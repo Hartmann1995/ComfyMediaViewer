@@ -1,0 +1,145 @@
+/* ============================================================================
+   像素快查 · 大图模式（2026-11-09 第二版）
+   ----------------------------------------------------------------------------
+   覆盖层：fixed 定位、pointer-events:none（必须 —— 否则镜片盖住画面后指针的
+   target 变成镜片，不再命中 <img> → 关窗 → 指针落回画面 → 开窗，抖成闪烁）。
+
+   层级：--z-mask(400)。必须高于大图 #lb（--z-full 350），低于右键菜单与提示条
+   （500 / 650）—— 镜片是「看」的辅助，不该压住用户临时调出来的菜单。
+
+   镜片是**正方形**，边长由 JS 按「这张图在屏幕上的渲染短边 × 0.8」现算并写进
+   inline style（夹在 300px 与 90% 视口短边之间）；这里只留一个 min() 兜底，
+   保证首帧也是正方形。canvas 的 backing store 在 JS 里按 CSS × dpr 算，见 peek.js。
+
+   背景是棋盘格而不是纯色：图比镜片小时（放大到边缘 / 小图）会留出图外区域，
+   棋盘格能一眼看出「这里是图外」，不会误以为图片是纯黑或纯白。
+   ========================================================================== */
+#peek{
+  position:fixed; left:0; top:0; z-index:var(--z-mask);
+  --peek-hud-h:26px;                /* HUD 高度：钉住提示条要避让它 */
+  display:none;
+  /* 兜底尺寸：真正的边长由 JS 按「这张图在屏幕上的渲染短边 × 0.8」现算，
+     写进 inline style；这里只在首帧（还没算出来）时撑一下，保持正方形。 */
+  width:min(680px, 46vw);
+  height:min(680px, 46vw);
+  border-radius:10px;
+  overflow:hidden;
+  contain:layout paint;             /* 内部变化不外溢，不触发外层重排 */
+  pointer-events:none;              /* 见文件头：不加这一条会抖 */
+  border:1px solid var(--border2);
+  /* 双层：一圈 1px 亮描边（任何底色上都看得出边界）+ 投影（浮在画面上）。
+     只靠 --border2 在深色主题下几乎看不见，镜片边界就糊进画面里了。 */
+  box-shadow:0 0 0 1px rgba(255,255,255,.18),
+             0 18px 48px rgba(0,0,0,.55), 0 2px 8px rgba(0,0,0,.36);
+  background-color:var(--panel);
+  background-image:
+    linear-gradient(45deg, rgba(128,134,148,.18) 25%, transparent 25%, transparent 75%, rgba(128,134,148,.18) 75%),
+    linear-gradient(45deg, rgba(128,134,148,.18) 25%, transparent 25%, transparent 75%, rgba(128,134,148,.18) 75%);
+  background-size:16px 16px;
+  background-position:0 0, 8px 8px;
+}
+#peek.on{display:block}
+
+#peekCv{
+  display:block;
+  width:100%; height:100%;
+  /* 画布内容由 JS 按「1 图像像素 = 1 物理像素」逐像素画出，这里只负责铺满 */
+}
+
+/* 钉住态：一条主色描边 + 底栏说明，与「跟随态」一眼可分
+   （钉住后镜片不再跟随指针，没有提示的话用户会以为它卡住了） */
+#peek.pinned{
+  border-color:var(--ac-tx, #7CA6F5);
+  box-shadow:0 0 0 2px var(--ac-tx, #7CA6F5), 0 18px 48px rgba(0,0,0,.48);
+}
+#peek .peek-pin{display:none}
+#peek.pinned .peek-pin{
+  display:block;
+  position:absolute; right:0; bottom:var(--peek-hud-h); left:0;
+  padding:6px 10px calc(6px + env(safe-area-inset-bottom, 0px));
+  font-size:12px; line-height:1.2;
+  color:var(--ac-tx, #7CA6F5);
+  background:linear-gradient(180deg, transparent, rgba(10,12,18,.82) 42%);
+  text-align:right;
+}
+
+/* 底栏 HUD：原图尺寸 / 屏幕占比 / 格式 / 大小 / 像素坐标 / 1:1
+   数据全部来自舞台那张 <img> 与 curItem()，零额外请求。
+   contain:layout —— 坐标每帧都在变，别让这行字把外层布局拖下水。 */
+#peek .peek-hud{
+  position:absolute; right:0; bottom:0; left:0;
+  height:var(--peek-hud-h);
+  display:flex; align-items:center; gap:10px;
+  padding:0 10px;
+  font-size:11.5px; line-height:var(--peek-hud-h);
+  color:#E4E7EB;
+  background:linear-gradient(180deg, rgba(10,12,18,0), rgba(10,12,18,.80) 35%, rgba(10,12,18,.94));
+  white-space:nowrap; overflow:hidden;
+  font-variant-numeric:tabular-nums;
+  contain:layout style;
+}
+#peek .peek-hud .ph-d{font-weight:600}
+#peek .peek-hud .ph-m{
+  color:#A1A7B3;
+  overflow:hidden; text-overflow:ellipsis;
+}
+
+/* 占位 / 错误：居中一行字。原图解码偶尔要几百毫秒，先给一行字比给一片空白好 */
+#peek .peek-msg{
+  position:absolute; inset:0;
+  display:none;
+  align-items:center; justify-content:center;
+  padding:0 18px;
+  font-size:12.5px; line-height:1.4;
+  color:#A1A7B3;
+  text-align:center;
+  background:rgba(12,14,20,.55);
+}
+#peek .peek-msg.on{display:flex}
+#peek .peek-msg.bad{color:#F08A8A}
+
+/* ============================================================================
+   入口按钮 + 首次提示（2026-11-09）
+   ----------------------------------------------------------------------------
+   「按住 Ctrl 悬停」是个只有手势、没有任何可见痕迹的功能 —— 不说等于没有。
+   左下角常驻一颗胶囊按钮，点了就进跟随模式，不用一直按着 Ctrl。
+   尺寸全走 --fsx / --sp-*，与 #filmTgl / #navL 同一套多视口口径，不写死像素。
+   ========================================================================== */
+#peekTgl{
+  display:inline-flex;align-items:center;gap:calc(6px*var(--fsx));
+  height:calc(24px*var(--fsx));min-height:0;padding:0 calc(10px*var(--fsx));
+  border:1px solid var(--border);border-radius:var(--r-pill);
+  background:var(--ovl-chip-bg);color:var(--tx2);
+  font-size:var(--fs-micro);line-height:1;cursor:pointer;flex:none;
+  backdrop-filter:blur(6px);
+  transition:color var(--dur-fast) var(--ease-std),
+             background var(--dur-fast) var(--ease-std),
+             border-color var(--dur-fast) var(--ease-std);
+}
+#peekTgl:hover{color:var(--tx);border-color:var(--border2);background:var(--panel3)}
+/* 视频 / 无图时（syncBtn 设 hidden）不露面。display:inline-flex 会盖掉
+   hidden 的默认 display:none，必须显式补一条 —— 否则「隐藏」根本不生效。 */
+#peekTgl[hidden]{display:none}
+#peekTgl .ic{font-size:0;display:flex;align-items:center;justify-content:center}
+#peekTgl .iico{width:calc(13px*var(--fsx));height:calc(13px*var(--fsx))}
+/* 开启态用主色（与顶栏 .tbtn.on 同一套语汇）：一眼看出「现在是开着的」 */
+#peekTgl.on{color:var(--ac-tx);border-color:var(--ac-tx);background:var(--ac-soft)}
+#peekTgl:focus-visible{outline:2px solid var(--ac-tx);outline-offset:2px}
+
+/* 一次性提示：弹在按钮上方，指向按钮。只在第一次进大图时出现 9 秒。
+   position:absolute + pointer-events:none —— 不占 dock 的 flex 位、不吃点击。 */
+#peekHint{
+  position:absolute;left:0;bottom:calc(100% + calc(9px*var(--fsx)));
+  display:block;padding:calc(6px*var(--fsx)) calc(10px*var(--fsx));
+  white-space:nowrap;
+  border:1px solid var(--border2);border-radius:var(--r-md);
+  background:var(--panel);color:var(--tx);
+  /* 这条是「教学文案」，必须一眼读清：--fs-micro 在 11px 档下中文挤成一坨，
+     实测截图里「悬停」二字糊成了白块。用 --fs-meta（与放大徽标同档）。 */
+  font-size:var(--fs-meta);line-height:1.35;
+  box-shadow:0 10px 26px rgba(0,0,0,.45);
+  opacity:0;transform:translateY(4px);pointer-events:none;
+  transition:opacity var(--dur-base) var(--ease-std),
+             transform var(--dur-base) var(--ease-std);
+}
+#peekHint.on{opacity:1;transform:none}

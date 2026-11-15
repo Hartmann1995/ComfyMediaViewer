@@ -1,0 +1,126 @@
+/* ComfyMediaViewer · css/responsive.css
+   窄屏适配（阶段六）：≤900px 抽屉式侧栏，≤620px 底部详情抽屉 + 大触摸目标，≤480px 只留核心操作。
+   放在样式表末尾：否则会被前面写的左栏基础规则覆盖。 */
+/* P1-29（2026-09-20）：底色改走 --mask-drawer 令牌 —— 此前是裸 rgba(0,0,0,.55)，
+   亮色主题下**没有覆盖**，纯黑压在白面板上发脏。现在亮色/暗色各自取值。 */
+#navBack{display:none;position:fixed;inset:0;z-index:var(--z-scrim);background:var(--mask-drawer)}
+body.nav-open #navBack{display:block}
+
+@media (max-width:900px){
+  /* 左栏 → 覆盖式抽屉（宽度不窄于桌面侧栏，保持条目文字完整） */
+  #left{position:fixed;left:0;top:0;bottom:0;z-index:var(--z-drawer2);width:min(86vw,calc(300px*var(--fsx)));
+    transform:translateX(-103%);transition:transform var(--dur-base) var(--ease-std);
+    box-shadow:var(--sh-drawer-side)}
+  body.nav-open #left{transform:none}
+  #left.collapsed{width:min(86vw,calc(300px*var(--fsx)));padding:var(--sp-3) 0 var(--sp-4);
+    border-right:1px solid var(--border);overflow-y:auto;margin-left:0}   /* 抽屉模式下「折叠」由开合取代；
+    margin-left:0 必须留：宽屏的折叠位移是负 margin，若不清掉，「宽屏折叠 → 缩窗 → 开抽屉」会把抽屉推出屏外 */
+  #leftTgl{position:fixed;left:0;top:calc(var(--top-h) + var(--sp-3));z-index:var(--z-raise);
+    /* 基础规则的 translateX(calc(var(--left-w) - 1px)) 是宽屏贴侧栏右缘用的；
+       窄屏把手由 left 定位（抽屉模式），必须清零，否则会被推右 259px 跑出可视区。 */
+    transform:none;
+    transition:left var(--dur-base) var(--ease-std),color var(--dur-fast)}
+  body.nav-open #leftTgl{left:min(86vw,calc(300px*var(--fsx)))}
+  /* 顶栏只留：面包屑 / 搜索 / 更多 */
+  /* C1-P1-2（2026-10-18）：此前这里把 #crumbs 一并 display:none，与 #left 变抽屉
+     （translateX(-103%)）叠加 ⇒ 窄窗口下**根目录名完全消失**：
+     · #left 里承载根名的 #rootBtn 被推出视口（实测 x=-297，900/820/760/660/480 全是负值）；
+     · #crumbs 被本条隐藏；
+     · 顶层时 #sideNav 又是空的（批次 J 去重：顶层根名只由 #rootBtn 承担）。
+     后果不是「不好看」而是「不知道自己在哪个目录、也没有上级导航」—— 用户得先想到去开抽屉。
+     修法：保留面包屑作为窄屏的位置区（`crumbs()` 本来就把根名放在第一段，天然覆盖顶层），
+     只给宽度上限 + 省略号，避免它把搜索框挤没；
+     上级导航由面包屑的锚点承担，所以下一行仍可隐藏 #btnUp（两者职责重复）。 */
+  #crumbs{flex:0 1 auto;min-width:0;max-width:min(38vw,calc(260px*var(--fsx)));
+    overflow:hidden;white-space:nowrap}
+  #crumbs a,#crumbs span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+  #top>#btnUp{display:none}
+  #qmode{display:none}
+  #gridwrap{padding:var(--sp-3)}
+  /* F7-P2-3（2026-10-20）：≤900px 时批量条内容宽 535~796px、可视宽只有 340~463px，
+     尾部的「删除所选」「退出批量」被挤出可视区（横向滚动很难够到这两个最常用按钮）。
+     改成折行 —— 按钮可能排两行，但常用的两个一定在首屏内。
+     ⚠️ 不要退回 overflow-x:auto：那只是「理论上能滚」，实测 elementFromPoint 取不到尾部按钮。 */
+  #batchBar{max-width:calc(100vw - var(--sp-3));flex-wrap:wrap;justify-content:center;
+    row-gap:var(--sp-1);overflow-x:visible}
+}
+
+@media (max-width:620px){
+  /* 触摸目标不小于约 40px */
+  #top .tbtn,#lb-top button,#lb-top select,#batchBar button,#filterChips button{
+    min-height:calc(40px*var(--fsx))}
+  /* B6（2026-10-28）：上面那 5 组只是「顶栏/大图条/批量条/筛选条」，**工具条与内容区没覆盖**：
+     · #gridBar 的图标按钮与下拉是 --h-ctl = 28px（375px 宽屏上 5 个并排，指头一按就串行）；
+     · 标签胶囊 22px，右侧摘除键只有 16px —— 这是最危险的一个，按不准就是「点掉一个标签」；
+     · 时间轴索引行 ≈22px（3px 上下内边距 + 元字号）。
+     ⚠️ `.tagchip` 是**定高**（height:22px），只写 min-height 是无效的，必须一并 height:auto。
+     ⚠️ 摘除键放到 32px 但胶囊本身 40px 内 — 32 是「手指能稳定按到」的最小实际值，
+        再大就会把胶囊挤成一个大圆球（视觉上不像标签了）。 */
+  #gridBar .gbtn,#gridBar select,
+  .tagchip,#tagInput,#tlIndex .ti{min-height:calc(40px*var(--fsx))}
+  .tagchip,#tagInput{height:auto}
+  .tagchip{padding-right:calc(2px*var(--fsx))}
+  .tagchip .x{width:calc(32px*var(--fsx));height:calc(32px*var(--fsx))}
+  #top{height:auto;min-height:var(--top-h);padding:var(--sp-2)}
+  /* B4（2026-10-28）：窄屏给卡片一个 150px 下限，别让密集档位把格子挤成一团。
+     ⚠️ 这条规则原来写在 layout.css 的 620 断点里，**从来没生效过** ——
+        `#grid` 在 gallery.css:12 也有同权重声明，而 gallery.css 后加载 ⇒ 一直是它赢。
+        （所以审计报告里「620 区间密度滑块失效、绕过 --card-min」是误判；
+          批 1 的 U6 在 600px 下改 --card-min、列宽跟着变，就是证据。）
+        挪到这里才真正生效：responsive.css 是最后一张样式表。
+     ⚠️ 仍读 --card-min（密度滑块不能废），只把下限抬到 150px；下半档由 480 断点的 140px 接。
+     ⚠️ 故意**不乘 --fsx**：基础规则与 480 断点都不乘，只在这一档乘会让「窗口越窄格子越大」，
+        620/621 两侧还会突变。字号放大要不要连带放大卡片是产品决策（报告里列为待拍板）。 */
+  #grid{grid-template-columns:repeat(auto-fill,minmax(min(max(var(--card-min,150px),150px),100%),1fr))}
+  /* 大图顶部操作条：横向滚动兜底已上移到 viewer.css 基础规则（L1，2026-09-27）——
+     620~980px 区间同样会放不下，窄屏这里只保留间距压缩 */
+  #lb-top{gap:var(--sp-1);padding:0 var(--sp-2)}
+  #lb-top .lname{flex:0 0 auto;max-width:36vw}
+  #lb-top .ldim{display:none}
+  #lb-top .acts{margin-left:0}
+  /* 详情面板 → 底部抽屉 */
+  #side{position:fixed;left:0;right:0;bottom:0;top:auto;width:100%;max-width:none;
+    height:min(58vh,calc(520px*var(--fsx)));border-left:none;border-top:1px solid var(--border2);
+    border-radius:var(--r-xl) var(--r-xl) 0 0;transform:translateY(103%);
+    transition:transform var(--dur-base) var(--ease-std);z-index:var(--z-panel)}
+  #side:not(.hidden){transform:none}
+  #side.hidden{transform:translateY(103%);margin-right:0}
+  #sideTgl{position:fixed;right:var(--sp-3);bottom:calc(var(--bot-h) + var(--sp-3));top:auto;
+    width:calc(42px*var(--fsx));height:calc(42px*var(--fsx));border-radius:var(--r-pill);z-index:var(--z-vbar);
+    border:1px solid var(--border2)}
+  /* 2026-11-05 P2：`#side.hidden~#sideTgl{right:0}`（viewer.css）特异性 (1,2,0)，
+     压过上面这条 (1,0,0) ⇒ 窄屏下浮动开关贴死右边缘、丢掉 12px 内边距。
+     宽屏时侧栏收起后按钮贴边是设计；窄屏这里是浮在网格上的圆钮，贴边不是。
+     同特异性写一遍即可（responsive.css 在 viewer.css 之后加载）。 */
+  #side.hidden~#sideTgl{right:var(--sp-3)}
+  #lbMid:has(> #side:not(.hidden)) #navR{right:var(--sp-2)}
+  #lbFilm{max-height:calc(72px*var(--fsx))}
+  /* 工具条：只剩视图/排序/批量，窄屏压缩间距即可 */
+  /* 620 @150% 下工具条多了「敏感内容」三态控件 ⇒ 间距再收一档：
+     gap 走 --sp-2 → --sp-1，内边距走 --pad-page → --sp-2。
+     后者与下面 `#top` 的窄屏处理同源（同一条策略，不是新发明）。
+     ⚠️ 别去改 `#gridBar #sort` 的 max-width：下拉的自然宽本来就小于上限，
+     实测改成 96px 收不到任何像素（无效改动）。 */
+  #gridBar{gap:var(--sp-1);padding-left:var(--sp-2);padding-right:var(--sp-2)}
+  #gridBar .glbl{display:none}
+  #gridBar #sort{max-width:calc(130px*var(--fsx))}
+  /* 底栏：页码可达 3 位数 × 10 个，只有中间的页码列表横向滚动，
+     左右箭头与「每页数量」始终固定可见 */
+  #bot{gap:var(--sp-2);padding:0 var(--sp-2);overflow:hidden}
+  #pager{flex:1 1 auto;min-width:0;max-width:none;gap:var(--sp-1)}
+  #pager .pgnums{flex:1 1 auto;gap:calc(2px*var(--fsx))}
+}
+
+@media (max-width:480px){
+  /* 只保留核心操作：视图切换收起，低频入口走「⋯ 更多」
+     （B11：原有一条 `#top .brand{display:none}`，但顶栏没有 `.brand` 元素 —— 幽灵规则，已删。） */
+  /* P1-30（2026-09-20）：此前这里写死 `minmax(140px,1fr)`，把密度滑块（它写 --card-min）
+     整个盖掉 ⇒ 窄屏下**滑块完全失效**。改为仍读 --card-min，只加一个「不小于 140px」的
+     下限（窄屏卡片太窄会挤成一团），并给 100% 上限防溢出 —— 这样滑块在窄屏也生效。 */
+  #grid{grid-template-columns:repeat(auto-fill,minmax(min(max(var(--card-min,140px),140px),100%),1fr))}
+  #lb-top button{padding:0 var(--sp-2)}
+  #batchBar{padding:var(--sp-1) var(--sp-2);gap:var(--sp-1)}
+  #toastStack>div{max-width:92vw}
+  /* B11（2026-10-27）：原有一条 `#perPage{font-size:var(--fs-meta)}` —— 与全局
+     `#bot select` 的取值完全相同，且选择器权重更低（1,0,0 < 1,0,1），从未生效。 */
+}

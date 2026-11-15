@@ -1,0 +1,46 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  syntax:
+    name: 语法与完整性
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Python 语法编译
+        run: >
+          python -m py_compile
+          server.py nsfw.py lora_links.py ws_client.py build_manual.py make_icon.py
+
+      - name: 前端脚本语法
+        shell: bash
+        run: |
+          fail=0
+          for f in frontend/js/*.js tauri-app/frontend/*.js; do
+            echo "check $f"
+            node --check "$f" || fail=1
+          done
+          exit $fail
+
+      - name: 随包模型校验和
+        shell: bash
+        run: |
+          python -c "import hashlib,sys; g=hashlib.md5(open('models/nsfw/nsfwjs.onnx','rb').read()).hexdigest(); print('md5=' + g); sys.exit(0 if g == '8378845657f32646d1bcbda233249104' else 1)"
+
+      - name: 构建必需文件
+        shell: bash
+        run: |
+          for f in server.py frontend/index.html models/nsfw/nsfwjs.onnx \
+                   mei_owner.txt ComfyMediaViewer.spec tauri-app/src-tauri/Cargo.toml; do
+            test -f "$f" || { echo "缺少 $f"; exit 1; }
+            echo "ok $f"
+          done

@@ -1,0 +1,18 @@
+# 默认按文本处理，由 git 自动判定
+* text=auto
+
+# Windows 批处理必须是 CRLF，否则 cmd 解析会出错
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制：禁止行尾转换与文本 diff
+*.ico binary
+*.png binary
+*.jpg binary
+*.webp binary
+*.onnx binary
+*.exe binary
+*.dll binary
+*.pyd binary
+*.woff2 binary
+*.zip binary

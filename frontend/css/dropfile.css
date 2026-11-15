@@ -1,0 +1,74 @@
+/* ComfyMediaViewer · css/dropfile.css（2026-11-04 新建）
+   外部原图拖拽打开时的整窗遮罩。
+
+   设计约束（与全站一致）：
+   · 尺寸一律走 --fsx 相对单位，禁写死像素 —— 字号档位切换时框要跟着变；
+   · 颜色只用 tokens 变量，深浅主题自动跟随，不写死 rgba 背景；
+   · z-index 走刻度 `--z-drop`（900）：压过大图（--z-full:350）与所有面板，但低于
+     桌面壳标题栏（--z-shell:1000）—— 标题栏是窗口自身的控件，不该被遮罩糊住。
+     2026-11-05 P2：此前这里是裸数字 900，刻度表里没有这一档（「有意的例外但没登记」），
+     现已登记为 `--z-drop`。
+*/
+#dropVeil{
+  position:fixed; inset:0; z-index:var(--z-drop);
+  display:flex; align-items:center; justify-content:center;
+  /* 半透明 + 模糊：既能压住背后的密集网格（否则虚框在缩略图上看不清），
+     又不至于让人完全失去「拖到了哪儿」的空间感。 */
+  background:color-mix(in srgb, var(--bg) 80%, transparent);
+  -webkit-backdrop-filter:blur(calc(3px*var(--fsx)));
+  backdrop-filter:blur(calc(3px*var(--fsx)));
+  /* ★ 关键：遮罩自己不吃指针/拖拽事件。
+     它铺满整窗，若参与命中测试，dragenter/dragleave 会在它和底层元素之间反复
+     补发，深度计数抖动 ⇒ 遮罩一闪一闪。让事件直接穿透到 document。 */
+  pointer-events:none;
+}
+#dropVeil[hidden]{ display:none; }
+
+#dropVeil .dv-box{
+  display:flex; flex-direction:column; align-items:center;
+  gap:calc(10px*var(--fsx));
+  padding:calc(30px*var(--fsx)) calc(44px*var(--fsx));
+  max-width:min(calc(560px*var(--fsx)), calc(100vw - 48px));
+  border-radius:var(--r-xl);
+  border:calc(2px*var(--fsx)) dashed var(--ac-a45);
+  background:color-mix(in srgb, var(--panel) 94%, transparent);
+  box-shadow:var(--sh-2);
+  text-align:center;
+  animation:dvIn calc(.16s) ease-out;
+}
+@keyframes dvIn{
+  from{ transform:scale(.97); opacity:0; }
+  to  { transform:none;       opacity:1; }
+}
+@media (prefers-reduced-motion: reduce){
+  #dropVeil .dv-box{ animation:none; }
+}
+
+#dropVeil .dv-ico{
+  width:calc(38px*var(--fsx)); height:calc(38px*var(--fsx));
+  color:var(--ac-tx);
+  margin-bottom:calc(2px*var(--fsx));
+}
+#dropVeil .dv-ico svg{ width:100%; height:100%; display:block; }
+
+#dropVeil .dv-ttl{
+  font-size:calc(15px*var(--fsx));
+  font-weight:600;
+  letter-spacing:.01em;
+  color:var(--tx);
+}
+#dropVeil .dv-sub{
+  font-size:calc(12px*var(--fsx));
+  line-height:1.55;
+  color:var(--tx2);
+}
+#dropVeil .dv-sub b{
+  /* 「最多 20 张」这类硬上限要能被一眼看到，但不该比标题抢眼 */
+  font-weight:600; color:var(--tx3);
+}
+
+/* 窄窗口：横向内边距收一点，避免文案换行成三四行 */
+@media (max-width:720px){
+  #dropVeil .dv-box{ padding:calc(24px*var(--fsx)) calc(24px*var(--fsx)); }
+  #dropVeil .dv-sub{ font-size:calc(11.5px*var(--fsx)); }
+}

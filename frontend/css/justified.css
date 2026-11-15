@@ -1,0 +1,38 @@
+/* ComfyMediaViewer · css/justified.css
+   「原比例铺满」布局（justified）—— 只在 body.jf 时生效。
+
+   为什么要单独一套：方格布局靠 `aspect-ratio:1` 把卡片撑成正方形，竖图在左右、
+   横图在上下各留一大片空白（实测真实库 11,641 张，平均只有 60.8% 的面积是图）。
+   本布局把每行的行高按该行图片比例反推出来，让每张卡片的宽高比**等于图片本身**，
+   空白归零、行右缘对齐。行宽/行高全部由 justified.js 在运行时按容器宽算出并写成内联值，
+   这里只负责「让卡片的盒子听内联值的」以及「把方卡时代的固定比例撤掉」。
+
+   ⚠️ 三条不能删的边界：
+   1. #grid 保持 **static**（不要加 position:relative）。卡片的 offsetParent 必须是
+      #gridwrap —— _hudPaint() 的二分、newfeed 的锚点、gridRowSpan() 的行分组全都
+      直接拿 offsetTop 跟 scrollTop 比；一旦 offsetParent 换成 #grid，这些值整体
+      偏移一个 padding，会静默错位（不报错，只是跳）。
+      justified.js 因此把 grid.offsetTop/Left 作为原点加进 left/top。
+   2. #grid 的**高度**由 JS 写内联值 = 内容总高。卡片是绝对定位、不参与文档流，
+      不写高度就会塌成 0 ⇒ 兄弟节点 #sent（续载哨兵）跑到顶部 ⇒ 一次把上万张
+      全部渲染。这是本布局最危险的一处耦合。
+   3. 图片必须 `height:100%; aspect-ratio:auto`。方卡那条 `.card img{aspect-ratio:1}`
+      仍然在 gallery.css 里，不覆盖的话卡片变高后图片会按宽度撑成正方形，下面留白。 */
+
+body.jf #grid{display:block}
+
+/* 绝对定位交给 CSS 兜底：卡片一插进 DOM 就脱离文档流，
+   即使 JS 还没写坐标，也不会把 #sent 往前顶。 */
+body.jf #grid > .card{position:absolute;margin:0;aspect-ratio:auto}
+
+/* 缩略图铺满格子：格子比例 = 图片比例 ⇒ contain 正好填满，不留边、不裁切。
+   （不用 cover：看图工具不能裁掉画面。） */
+body.jf #grid > .card > img,
+body.jf #grid > .card > video{
+  width:100%;height:100%;aspect-ratio:auto;object-fit:contain}
+
+/* 加载骨架原本是 aspect-ratio:1 的方框，卡片变高后会把下半张卡盖成灰块 */
+body.jf:not(.list-view) #grid .card::before{height:100%;aspect-ratio:auto}
+
+/* 目录卡/聚合卡在布局里按 1:1 参与，高度由内联值给，原 aspect-ratio 必须让位 */
+body.jf #grid > .card.dir{aspect-ratio:auto}

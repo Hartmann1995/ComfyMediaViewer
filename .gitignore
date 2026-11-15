@@ -1,0 +1,90 @@
+# ============================================================
+# ComfyMediaViewer · 版本控制忽略规则
+# 原则：只提交源码与构建配置，产物 / 备份 / 本地环境一律不入库
+# ============================================================
+
+# ---------- 构建产物 ----------
+build/
+dist/
+dist-desktop/
+_artifacts/
+_review/
+*.bak
+*.orig
+*.rej
+*.exe
+*.dll
+*.pyd
+*.so
+*.zip
+*.7z
+*.docx
+
+# ---------- Rust / Tauri ----------
+tauri-app/src-tauri/target/
+tauri-app/src-tauri/binaries/
+tauri-app/src-tauri/gen/schemas/
+
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pilenv/
+.nsfw-fallback/
+.pytest_cache/
+
+# ---------- 本地备份与历史包 ----------
+backup/
+ComfyMediaViewer V*介绍.html
+
+# ---------- 开发临时产物 ----------
+dev/_e2e/
+dev/_oneshot_*/
+dev/_from_third_v2122/
+dev/_e4_js_before_bak/
+dev/nsfw_3state_preview/
+tests/_data/
+tests/_tmp/
+
+# ---------- 运行 / 测试输出 ----------
+*.log
+coverage.xml
+htmlcov/
+
+# ---------- 系统文件 ----------
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# ============================================================
+# 公开仓库边界（2026-11-15 准备上传 GitHub）
+# 原则：只发布「产品源码 + 构建配置 + 用户文档」。
+# 开发期门禁、诊断脚本、内部审计报告一律不进库。
+# ============================================================
+
+dev/
+tests/
+tools/
+_review/
+
+# doc/ 只放行用户文档；内部审计 / 构想 / 方案 / 排期等不上传
+doc/*
+!doc/README.md
+!doc/CHANGELOG.md
+!doc/使用说明.md
+!doc/CIVITAI_LINKS.md
+
+# 开发期一次性脚本与残留
+b12_io.py
+clean_test_fixtures.bat
+relative.json
+ComfyMediaViewer_dbg.spec
+icon_preview.png
+
+# Tauri 壳目录里的临时输出
+tauri-app/src-tauri/cargo_out.txt
+tauri-app/src-tauri/tauri_shell_out.txt
+tauri-app/src-tauri/tauri_shell_err.txt
+tauri-app/src-tauri/tcheck.py

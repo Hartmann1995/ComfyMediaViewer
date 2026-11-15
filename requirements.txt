@@ -1,0 +1,14 @@
+# 运行期依赖（源码直启 / 打包后端都需要）
+# Python 3.9+（开发与发布验证使用 3.12 / 3.13）
+
+# 缩略图生成、EXIF 方向校正、图片格式转换
+Pillow>=9.1
+
+# 内容检测（NSFW）推理
+# 不装也能启动，只是「内容检测」功能不可用
+numpy>=1.24
+onnxruntime>=1.16
+
+# --- 仅构建/文档需要，按需手动安装 ---
+# pyinstaller>=6.0       打包单文件后端（ComfyMediaViewer.spec）
+# python-docx>=1.0       build_manual.py 生成使用说明书 docx

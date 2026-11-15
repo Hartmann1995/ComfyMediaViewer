@@ -1,0 +1,98 @@
+/* ComfyMediaViewer · css/newfeed.css（2026-11-04 · 新图浮窗 P2）
+ *
+ * 位置：左下角。为什么不是右下 —— 右下有 #posHud（滚动读数）和 toast，
+ * 而且大图/批量的主操作区都偏右，左下是整屏最"安静"的角落。
+ *
+ * 层级：--z-raise(300) —— 压过侧栏把手与批量条(300)，低于大图(350)；
+ * 因此大图打开时浮窗会被整块盖住，不需要额外隐藏逻辑。
+ */
+#newPip{
+  position:fixed; left:calc(var(--left-w) + var(--sp-4));
+  bottom:calc(var(--bot-h) + var(--sp-4));
+  /* ↑ 左边要让开左栏：left:16px 会压在侧栏底部（截图实测把「生成参数」最后一段盖住了）。
+     底部要让开 #bot（状态/分页），否则直接压住底栏。 */
+  z-index:var(--z-raise);
+  width:calc(126px*var(--fsx));
+  /* 上端瘦身（2026-11-04）：原来是 padding-top 8 + 头部 28 + 间距 6 = 42px 才见到第一张图。
+     那 28px 并非设计值 —— 是全局 `button{min-height:28px}` 把小按钮撑起来的（见 .nf-mini）。
+     现在 6 + 16 + 5 = 27px。 */
+  padding:calc(6px*var(--fsx)) calc(8px*var(--fsx)) calc(7px*var(--fsx));
+  background:var(--panel);
+  border:1px solid var(--border);
+  border-radius:calc(12px*var(--fsx));
+  box-shadow:var(--sh-2);          /* 2026-11-05 P2：原为裸写 rgba(0,0,0,.45)，与 --sh-2 同结构 */
+  font-size:var(--fs-meta);
+  color:var(--tx2);
+  transition:width .16s var(--ease-std),height .16s var(--ease-std),
+             padding .16s var(--ease-std),border-radius .16s var(--ease-std);
+}
+#newPip[hidden]{display:none}
+
+/* 头部定高：不跟着子元素浮动，避免再次被按钮的 min-height 撑开 */
+.nf-hd{display:flex;align-items:center;gap:calc(4px*var(--fsx));
+  height:calc(16px*var(--fsx));margin-bottom:calc(5px*var(--fsx))}
+.nf-lbl{font-size:var(--fs-meta);color:var(--tx2);line-height:1;white-space:nowrap}
+.nf-n{font-size:calc(11px*var(--fsx));color:var(--ac-tx);line-height:1;
+  font-variant-numeric:var(--num);font-weight:600;white-space:nowrap}
+/* 收起按钮：必须显式压掉全局 button 的 min-height / padding，否则 18px 的盒子实际有 28×24，
+   既把头部撑高，又只剩一块"看不见的空按钮"（hover 才浮出底色）。 */
+.nf-mini{margin-left:auto;width:calc(18px*var(--fsx));height:calc(16px*var(--fsx));
+  min-height:0;padding:0;line-height:1;
+  display:flex;align-items:center;justify-content:center;border-radius:calc(4px*var(--fsx));
+  color:var(--tx2);cursor:pointer;background:none;border:none}
+.nf-mini svg{display:block;width:calc(11px*var(--fsx));height:calc(11px*var(--fsx))}
+.nf-mini:hover{background:var(--hov);color:var(--tx)}
+
+/* 收起态才出现的"新图"标志（展开态隐藏） */
+.nf-ico{display:none}
+
+.nf-shots{display:flex;flex-direction:column;gap:calc(5px*var(--fsx))}
+.nf-shot{position:relative;display:block;height:calc(52px*var(--fsx));
+  border-radius:calc(7px*var(--fsx));overflow:hidden;cursor:zoom-in;
+  background:var(--panel2);border:1px solid var(--border)}
+.nf-shot:hover{border-color:var(--border2)}
+.nf-shot img{display:block;width:100%;height:100%;object-fit:cover}
+
+/* 内容安全：与网格卡片同一套判据（nsfwShouldVeil），只是这里没有"揭开"入口 ——
+   浮窗是缩略图，要看清就点开大图，大图有自己的揭开流程。 */
+.nf-shot.veil img{filter:blur(calc(9px*var(--fsx)));transform:scale(1.12)}
+.nf-shot.veil::after{content:"NSFW";position:absolute;inset:0;display:flex;
+  align-items:center;justify-content:center;
+  font-size:calc(10px*var(--fsx));letter-spacing:.06em;color:#fff;
+  background:rgba(0,0,0,.34);pointer-events:none}
+
+/* 收起态：圆徽标 = 「新图」标志 + 右上角计数角标
+   （原来是一个只有 "+3" 的空圆 —— 看不出它代表什么，也看不出能点开） */
+#newPip.collapsed{
+  width:calc(44px*var(--fsx));height:calc(44px*var(--fsx));padding:0;border-radius:50%;
+  cursor:pointer;overflow:visible;      /* 角标要压在圆边上，不能裁掉 */
+}
+#newPip.collapsed:hover{background:var(--panel2);border-color:var(--border2)}
+#newPip.collapsed .nf-hd{height:100%;margin:0;justify-content:center;gap:0;position:relative}
+#newPip.collapsed .nf-lbl,#newPip.collapsed .nf-mini{display:none}
+#newPip.collapsed .nf-ico{display:block;width:calc(18px*var(--fsx));height:calc(18px*var(--fsx));
+  color:var(--tx2);margin-top:calc(1px*var(--fsx))}
+#newPip.collapsed .nf-n{
+  position:absolute;right:calc(-1px*var(--fsx));top:calc(-1px*var(--fsx));
+  min-width:calc(16px*var(--fsx));height:calc(16px*var(--fsx));
+  padding:0 calc(4px*var(--fsx));
+  display:flex;align-items:center;justify-content:center;
+  font-size:calc(9px*var(--fsx));line-height:1;font-weight:700;
+  color:var(--on-ac);background:var(--ac);border-radius:calc(8px*var(--fsx));
+  box-shadow:0 0 0 calc(2px*var(--fsx)) var(--panel)}
+#newPip.collapsed .nf-shots{display:none}
+
+/* 新图首次出现时轻微提一下注意力（不弹窗、不抢焦点） */
+@keyframes nfIn{from{transform:translateY(calc(6px*var(--fsx)));opacity:0}
+                to{transform:none;opacity:1}}
+#newPip.nf-in{animation:nfIn .18s var(--ease-std)}
+
+@media (max-width:900px){
+  /* ≤900 左栏变成覆盖式抽屉（见 responsive.css），不再占位 ⇒ 浮窗回贴屏幕左缘 */
+  #newPip{left:var(--sp-4)}
+}
+@media (max-width:720px){
+  #newPip{width:calc(100px*var(--fsx))}
+  .nf-shot{height:calc(42px*var(--fsx))}
+  #newPip.collapsed{width:calc(40px*var(--fsx));height:calc(40px*var(--fsx))}
+}

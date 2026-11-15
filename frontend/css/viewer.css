@@ -1,0 +1,499 @@
+/* ComfyMediaViewer · css/viewer.css
+   大图 Loupe / 对比视图。V2.7 起「大图区 #lb」整体跟随亮/暗主题
+   （底色 --lb-bg、顶栏 --lb-top-bg、投影 --stage-glow、角标底 --ovl-chip-bg，
+   亮色下的取值在 tokens.css 里；对比页 #cmp 与视频条 #vidBar 仍固定深色）。 */
+
+/* ---------- 大图 Loupe ---------- */
+#lb{position:fixed;inset:0;z-index:var(--z-full);display:none;background:var(--lb-bg);flex-direction:column}
+#lb.on{display:flex}
+/* 顶栏高度与主顶栏共用 --top-h（V2.7：56 → 38，与网格顶栏同厚，同时保证桌面壳
+   悬浮的窗口按钮在大图模式下也能严丝合缝落在这一行里） */
+#lb-top{height:var(--top-h);display:flex;align-items:center;gap:var(--sp-2);
+  padding:0 var(--pad-page);flex:none;
+  /* L1（2026-09-27，修「窗口按钮重叠」）：放不下时收进横向滚动，绝不压到桌面壳窗口按钮底下。
+     此前只在 ≤620px 有滚动兜底（responsive.css），620~约980px 区间（125% DPI 的窄窗口
+     正好落在里面）子项全是 flex:none ⇒ 内容溢出右侧让位区，与悬浮的「最小化/最大化/关闭」
+     重叠（用户 1082 物理宽 @125% 实测）。断点跟随不了字号缩放（--fsx 是运行期变量），
+     所以兜底放基础规则：放得下时滚动容器没有任何视觉差异，放不下时裁切 + 可滚动
+     （与 #lbFilm 同款做法）。 */
+  overflow-x:auto;overflow-y:hidden;flex-wrap:nowrap;scrollbar-width:none;
+  background:var(--lb-top-bg);border-bottom:1px solid var(--border);font-size:var(--fs-ui)}
+#lb-top::-webkit-scrollbar{display:none}   /* 38px 横栏塞不下滚动条（同 #lbFilm），滚轮可横向滚动 */
+#lb-top .lname{color:var(--tx);font-size:var(--fs-body);overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;flex:1 1 auto;min-width:calc(60px*var(--fsx))}
+#lb-top .ldim{color:var(--tx3);font-family:var(--mono);font-size:var(--fs-meta);flex:0 1 auto;
+  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#lb-top .acts{margin-left:auto;display:flex;align-items:center;gap:var(--sp-1);flex:none}
+#lb-top .acts button{font-size:var(--fs-sm);height:var(--h-ctl);min-height:var(--h-ctl);padding:0 var(--sp-3)}
+#lb-top .acts select{height:var(--h-ctl);min-height:var(--h-ctl);font-size:var(--fs-sm)}
+/* V4 批次 2：顶栏按钮由「字符图标」改为 svg ⇒ 必须显式 flex 居中
+   （字符靠行高居中，svg 不会跟着文字基线走，否则图标会明显偏上/偏下） */
+#lb-top .acts button,#lb-top .tbtn{display:inline-flex;align-items:center;
+  gap:calc(6px*var(--fsx))}
+#lb-top .ic{font-size:0;display:flex;align-items:center;justify-content:center}
+#lb-top .ic .iico,#lb-top .acts button>.iico{width:calc(16px*var(--fsx));height:calc(16px*var(--fsx))}
+
+/* ============================================================
+   2026-10-31 顶栏极限态（用户窗口实测「删除按钮被裁不见」）
+   ------------------------------------------------------------
+   实测（1080/125% 档、NSFW 归类按钮在场的极限态、in-shell）：
+   `.acts` 自然宽 779px，窗口内容区一旦窄于「779 + 左侧返回/文件名」就溢出，
+   而 `#lb-top` 是**横向滚动容器**（见上方 L1 注释，滚动条被隐藏）——
+   溢出内容裁在让位边界外，用户既看不见也不知道能滚。
+   ⚠️ 不是「按钮被压扁」：实测 10 个控件 flex-shrink 全是 1，但宽度一个没缩
+      （压扁 0%），整排被推出去而已。别再往收缩率上找原因。
+
+   ① 删除钉住：sticky 让它永远停在裁切线内侧。实测 720/810/864/960 四档
+      「删除右越界」全部由 351/261/207/111 归零。背景必须不透明，
+      否则滚到底下的按钮会从字缝里透出来。
+      钉的是**「⋯」+「删除」这一组**（`.lb-tail`），不是只有删除：
+      只钉删除时，720 宽下「⋯」仍会被挤出可视区 ⇒ 收进菜单的项再也点不到
+      （实测截图：推送画布被删除压住一半、「⋯」整个不见）。
+   ② 溢出收纳：`.nested` = 已收进「⋯」的项（对「⋯」自己是「该藏起来」）。
+      收哪几项由 mvLbFit()（viewer.js）按实测剩余宽度现算，CSS 不参与决策。
+   ============================================================ */
+#lb-top .acts .nested{display:none !important}
+#lb-top .acts .lb-tail{position:sticky;right:0;z-index:var(--z-ctl);display:flex;align-items:center;
+  gap:var(--sp-1);background:var(--lb-top-bg)}
+/* sticky 与前一控件之间还留着 gap（--sp-1 = 4px），滚动时那一条会露出底下的内容 ⇒
+   用伪元素向左补盖住。用伪元素而不是 margin：不参与宽度计算，
+   放得下的时候排版与改动前逐像素一致。
+   ⚠️ 极窄窗口（720）收纳到底仍会剩几十像素溢出，此时尾部组左边是「推送画布」的
+     半截：纯色硬切看起来像界面坏了。改用 --sp-4 宽的渐变淡出，
+     读起来是「右边还有东西」，而不是「按钮被切断了」。 */
+#lb-top .acts .lb-tail::before{content:"";position:absolute;top:0;bottom:0;
+  left:calc(-1*var(--sp-4));width:var(--sp-4);
+  background:linear-gradient(to right,transparent,var(--lb-top-bg) 72%)}
+#lbMid{flex:1;display:flex;min-height:0;position:relative}
+#stage{flex:1;min-width:0;display:flex;align-items:center;justify-content:center;
+  padding:var(--sp-2);overflow:hidden;position:relative;
+  /* 2026-11-04：**自成层叠上下文**。占位层/原图层靠 z-index:0/1 分层，但它们原本
+     和 #stage 一起参与 #lbMid 的层叠 —— 原图层的 z-index:1 高于 #navL/#navR 的 auto，
+     横屏图（盒子几乎铺满舞台宽）就会把两侧翻页箭头整块盖住：看得见、点不到
+     （elementFromPoint 命中的是 img，点下去走的是「点空白关大图」）。
+     isolation 把这两层的层级关在舞台内部，控件作为兄弟节点自然画在舞台之上。 */
+  isolation:isolate}
+#stage img,#stage video{max-width:100%;max-height:100%;border-radius:0;
+  box-shadow:var(--stage-glow)}
+#stage img{cursor:grab;user-select:none;-webkit-user-drag:none;touch-action:none}
+/* 2026-10-31 · 大图「先缩略图后原图」的**占位层**（viewer.js: openLb 图片分支）。
+   它和最终图层是两个独立元素 —— 换 src 会让 Chromium 丢掉旧帧（实测空一整帧底色），
+   所以占位层从头到尾不换 src，只负责「先有画面」。
+   绝对定位覆盖整个舞台内容区（absolute 的包含块是 #stage 的 padding box），
+   `object-fit:contain` 保证内容居中、比例正确；`pointer-events:none` 让滚轮/拖拽/双击
+   全部落到下面的最终图层上（否则缩小 200ms 的占位层会**吞掉用户第一次双击**）。
+   投影置 none：`--stage-glow` 是按元素盒画的，占位层此刻比原图大，留着会多出一圈光晕。 */
+#stage img.lb-ph{position:absolute;left:0;top:0;width:100%;height:100%;
+  object-fit:contain;pointer-events:none;box-shadow:none;z-index:0}
+#stage img.grabbing{cursor:grabbing}
+/* ε-2（2026-09-20）：大图加载失败态（viewer.js 的 img.onerror 渲染它）。
+   此前这类失败静默掉 ⇒ 舞台一片空白，用户不知道是图坏了还是程序卡了。
+   全部走令牌 + 相对字号，跟着主题与字号档位（--fsx）一起缩放，不写死像素。 */
+#stage .lb-fail{max-width:min(100%,calc(420px*var(--fsx)));text-align:center;
+  padding:var(--sp-4) var(--sp-3);color:var(--tx2);font-size:var(--fs-body);
+  line-height:1.7;user-select:text}
+#stage .lb-fail .sub{margin-top:var(--sp-2);font-size:var(--fs-sm);color:var(--tx3);
+  word-break:break-all}
+#navL,#navR{position:absolute;top:50%;transform:translateY(-50%);width:calc(44px*var(--fsx));
+  height:calc(72px*var(--fsx));min-height:0;display:flex;align-items:center;justify-content:center;
+  font-size:calc(24px*var(--fsx));color:var(--tx3);
+  background:transparent;border:none;border-radius:var(--r-lg)}
+#navL:hover,#navR:hover{color:var(--tx);background:var(--panel3)}
+#navL{left:var(--sp-2)}#navR{right:var(--sp-2);transition:right var(--dur-base) var(--ease-std)}
+#navL .iico,#navR .iico{width:calc(26px*var(--fsx));height:calc(26px*var(--fsx))}
+/* 详情面板展开时，#navR 定位锚定到照片舞台右缘(避开面板),与 #navL 对称。
+   右偏移与面板实际宽度 min(340px*var(--fsx),58vw) 对齐（窄窗口/大字号下面板变窄，箭头随之左移） */
+#lbMid:has(> #side:not(.hidden)) #navR{right:calc(min(340px*var(--fsx),58vw) + var(--sp-2))}
+
+/* M1（2026-10-08）：视频「手动开始」的中央播放按钮。
+   与 #navL/#navR 同一套浮层语汇（绝对定位 + --fsx 钳位尺寸 ⇒ 多视口/大字号自适应），
+   z-index 比左右箭头高一级：视频居中时按钮压在舞台中央，箭头仍在两侧可翻页。
+   ⚠️ 尺寸算式含 --fsx、位置用 --sp-*，不写死像素（本项目硬约束）。
+   ⚠️⚠️ **居中基准必须是 #stage，不是 #lbMid**：详情面板 #side 也在 #lbMid 里，
+      `left:50%` 会取「含面板」的中点 ⇒ 面板一开按钮就偏左（实测 Δx=170px）。
+      修法与 #navR/#filmTgl 同源 —— 面板展开时把中点左移面板半宽（面板宽 min(340px*--fsx,58vw)，
+      与 #side 完全同源自不必另立常量）。窄屏下面板变窄，偏移随之缩小，不会把按钮推出舞台。 */
+#lbPlay{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  width:calc(84px*var(--fsx));height:calc(84px*var(--fsx));min-height:0;
+  display:flex;align-items:center;justify-content:center;
+  border-radius:50%;cursor:pointer;z-index:var(--z-lift);
+  color:var(--code-tx);background:var(--ovl-chip-bg);border:1px solid var(--border);
+  backdrop-filter:blur(6px);
+  transition:transform var(--dur-fast) var(--ease-std),
+             left var(--dur-base) var(--ease-std)}
+#lbMid:has(> #side:not(.hidden)) #lbPlay{
+  left:calc(50% - min(170px*var(--fsx),29vw))}
+#lbPlay[hidden]{display:none}
+#lbPlay:hover{transform:translate(-50%,-50%) scale(1.06)}
+#lbPlay .iico{width:calc(34px*var(--fsx));height:calc(34px*var(--fsx))}
+/* 左下角停靠区（2026-11-09）：像素快查按钮 + 放大徽标同一行。
+   两者原先都想抢 left/bottom 同一块地方 —— 徽标独立绝对定位时，按钮一出现就重叠。
+   容器布局、子项静态排（flex），徽标的显隐仍由 viewer.js 的 apply() 控制，
+   它只是不再自己定位。 */
+#lbDock{position:absolute;left:var(--sp-3);bottom:var(--sp-3);z-index:var(--z-lift);
+  display:flex;align-items:center;gap:var(--sp-2)}
+#zoomBadge{position:static;z-index:var(--z-lift);background:var(--ovl-chip-bg);
+  color:var(--code-tx);border:1px solid var(--border);border-radius:var(--r-md);
+  padding:2px var(--sp-2);font-size:var(--fs-meta);font-family:var(--mono);
+  display:none;pointer-events:none}
+/* 右侧详情面板 */
+#side{width:calc(340px*var(--fsx));max-width:min(340px*var(--fsx),58vw);background:var(--panel);
+  border-left:1px solid var(--border);display:flex;flex-direction:column;flex:none;
+  transition:margin var(--dur-base) var(--ease-std)}
+#side.hidden{margin-right:calc(-341px*var(--fsx))}
+#side .hd{padding:var(--sp-2) var(--sp-3);border-bottom:1px solid var(--border);display:flex;
+  gap:var(--sp-1);align-items:center;flex-wrap:wrap;flex:none}
+#side .hd .spacer{flex:1}
+/* E5-6（2026-09-23）：面板小标题（「详情」）。
+   此前是 index.html 的内联样式，且与**同一个面板**里的 #tagPanel .tph（tags.css）逐项重复
+   —— 唯一差别是那边写 `calc(1.2px*var(--fsx))`、这边写裸 `1.2px`（不随字号缩放）。
+   收到这里对齐两者，视觉零变化。 */
+#side .hd .hd-t{font-size:var(--fs-micro);text-transform:uppercase;color:var(--tx3);
+  letter-spacing:var(--ls-caps)}
+#side .hd b{font-size:var(--fs-sm);color:var(--tx3);font-weight:var(--fw-semi);word-break:break-all;
+  min-width:calc(80px*var(--fsx))}
+#side .hd select{max-width:calc(120px*var(--fsx));font-size:var(--fs-sm)}
+#side .hd #btnClose{margin-left:0}
+#sideTgl{position:absolute;right:0;top:var(--sp-3);width:calc(26px*var(--fsx));height:calc(56px*var(--fsx));
+  min-height:0;background:var(--panel2);border:1px solid var(--border);border-right:none;
+  border-radius:var(--r-lg) 0 0 var(--r-lg);color:var(--tx3);
+  display:flex;align-items:center;justify-content:center;font-size:var(--fs-sm);cursor:pointer;z-index:var(--z-ctl)}
+#sideTgl:hover{color:var(--tx);background:var(--panel3)}
+#sideTgl .iico,#sideTglX .iico{width:calc(14px*var(--fsx));height:calc(14px*var(--fsx))}
+#sideTglX{display:inline-flex;align-items:center;justify-content:center}
+#side.hidden~#sideTgl{right:0}
+/* min-height:0：flex 项的默认 min-height:auto 会拒绝收缩到内容高度以下 ——
+   只写 flex:1 时，#tagPanel 一旦变高（B5）就轮不到 #meta 让位，整列直接溢出 #side。 */
+#meta{flex:1;min-height:0;overflow:auto;padding:var(--sp-3);font-size:var(--fs-sm);scrollbar-width:thin}
+#meta .k{color:var(--ac-tx);margin:var(--sp-3) 0 var(--sp-1);font-weight:var(--fw-semi);font-size:var(--fs-sm)}
+#meta .row{color:var(--tx2);margin:calc(2px*var(--fsx)) 0}
+/* E5-7（2026-09-23）：「元数据读取失败」与「本来就没有生成信息」是两回事，要一眼分开。
+   2026-11-08 起这两条空态**升格为 .mnote 框**（读失败 = .mnote.bad 红框，见下方 #meta .mnote 段），
+   `.row.err` 随之作废 —— 这里只留一句指路，别再把它写回来（它会和 .mnote 同时命中、规则打架）。 */
+#meta .cpv{cursor:copy;border-bottom:1px dashed var(--border2)}
+#meta .cpv:hover{color:var(--ac-tx);border-bottom-color:var(--ac)}
+#meta .vidinfo{color:var(--tx3)}
+#meta pre{background:var(--code-bg);border:1px solid var(--border);border-radius:var(--r-md);
+  padding:var(--sp-2);overflow:auto;max-height:calc(300px*var(--fsx));white-space:pre-wrap;
+  word-break:break-all;color:var(--code-tx);margin:0;font-family:var(--mono);
+  font-size:var(--fs-meta);line-height:var(--lh-loose)}
+#meta details{margin:var(--sp-2) 0}
+#meta summary{cursor:pointer;color:var(--tx2);user-select:none;font-size:var(--fs-sm)}
+#meta summary:hover{color:var(--ac-tx)}
+#meta a.cp{color:var(--ac-tx);font-size:var(--fs-meta);text-decoration:none}
+#meta a.cp:hover{text-decoration:underline}
+/* V14：复制成功时触发元素短暂变成功色（.cpv 的虚线底边一起变色） */
+#meta a.cp.copied{color:var(--ok-tx)}
+#meta .cpv.copied{color:var(--ok-tx);border-bottom-color:var(--ok-tx)}
+#lb-top #btnCopy.copied{background:var(--ok);border-color:var(--ok)}
+.skel{position:relative;overflow:hidden;border-radius:var(--r-sm);background:var(--panel2);min-height:calc(13px*var(--fsx))}
+.skel::after{content:"";position:absolute;inset:0;transform:translateX(-100%);
+  background:linear-gradient(90deg,transparent,var(--hov),transparent);animation:skel var(--dur-loop) infinite}
+@keyframes skel{to{transform:translateX(100%)}}
+/* 预览栏：高度随视口自适应（不写死像素，兼容不同分辨率/DPI） */
+#lbFilm{--fh:clamp(64px,11vh,140px);height:var(--fh);flex:none;background:var(--canvas);
+  border-top:1px solid var(--border);display:flex;align-items:center;gap:var(--sp-1);
+  padding:0 var(--sp-2);overflow-x:auto;transition:margin var(--dur-base) var(--ease-std);scrollbar-width:none}
+#lbFilm::-webkit-scrollbar{display:none}   /* 隐藏横向滚动条，避免盖住缩略图底部；滚轮可横向滚动 */
+#lbFilm.off{display:none}
+/* 预览栏收起/展开开关（舞台右下角，收起后仍可点） */
+#filmTgl{position:absolute;right:var(--sp-2);bottom:var(--sp-2);z-index:var(--z-ctl);
+  width:calc(64px*var(--fsx));height:calc(20px*var(--fsx));min-height:0;
+  background:var(--panel2);border:1px solid var(--border);border-radius:var(--r-pill);
+  color:var(--tx3);font-size:var(--fs-micro);cursor:pointer;
+  display:flex;align-items:center;justify-content:center}
+#filmTgl:hover{color:var(--tx);background:var(--panel3)}
+#filmTgl .iico{width:calc(13px*var(--fsx));height:calc(13px*var(--fsx))}
+/* 详情面板展开时锚定到舞台右缘（与 #navR 同规则）。宽度算式必须与 #side 完全同源
+   ——min(340px*var(--fsx),58vw)——否则字号放大时面板变宽而这里不跟着变，
+   预览栏与收起开关会被压在面板底下（V2.8.4 修）。 */
+#lbMid:has(> #side:not(.hidden)) #filmTgl{right:calc(min(340px*var(--fsx),58vw) + var(--sp-2))}
+/* 详情面板展开时，预览栏截止到面板左缘，不延伸到面板下方 */
+#lb:has(#side:not(.hidden)) #lbFilm{margin-right:min(340px*var(--fsx),58vw)}
+/* 缩略格跟随栏高：占满栏内可用高度（上下各留 4px），宽度按 1:1 自适应 */
+#lbFilm .f{position:relative;flex:none;width:auto;height:calc(var(--fh) - var(--sp-1)*2);aspect-ratio:1/1;
+  background:var(--canvas);border-radius:var(--r-md);overflow:hidden;border:1px solid var(--border);
+  cursor:pointer;opacity:.72;transition:opacity var(--dur-fast)}
+#lbFilm .f:hover{opacity:1}
+/* P1-24（2026-09-20）：此前只有 :hover / .on 两态，**按下（:active）零反馈** ——
+   「大图预览栏缩略格按下零反馈」。这里补一档：轻微收缩 + 描边，走 --dur-fast，
+   与工程其它按钮的按下手感同口径（不用 transform:scale，避免缩略图重排带来的抖动）。 */
+#lbFilm .f:active{opacity:1;border-color:var(--ac2);box-shadow:var(--ring-line)}
+#lbFilm .f.on{border-color:var(--ac);box-shadow:var(--ring-line);opacity:1}
+#lbFilm .f img{width:100%;height:100%;object-fit:contain;display:block}
+/* V47（2026-10-08）：视频格子改为渲染真首帧（见 settings.js buildFilm），
+   这里的 video 必须与 img 同款撑满；object-fit:cover 而非 contain —— 视频多为
+   16:9 而格子是 1:1 正方，contain 会留出上下黑边（看起来又像「没显示」），
+   cover 裁掉两侧更接近缩略图观感。pointer-events:none 交给格子本体接点击。 */
+#lbFilm .f video{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;
+  background:var(--canvas)}
+/* 播放角标：视频格子右上角补一枚小图标（首帧已经能看出是视频了，这里只做类型提示）。
+   ⚠️ 与 .fb（旧的整格居中大图标）区分：那个随本次改动已不再产出，但保留规则不删，
+      避免有历史 DOM 残留时样式塌掉（灰度期安全）。 */
+#lbFilm .f .fb{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  font-size:clamp(14px,1.8vh,26px);opacity:.4}
+#lbFilm .f .fb .iico{width:clamp(14px,1.8vh,26px);height:clamp(14px,1.8vh,26px)}
+/* 首尾隐形占位：让第一张/最后一张缩略图也能滚动到正中（宽度=半个视口-半格缩略图） */
+#lbFilm .fsp{flex:none;width:calc(50% - (var(--fh) - var(--sp-1)*2)/2);height:100%}
+
+/* ---------- 对比视图 ---------- */
+/* U5 收口（批次 A）：容器底色从写死的 rgba(10,11,14,.99) 收进 --cmp-bg 令牌。
+   ⚠️ **不是**改色 —— 对比页刻意不跟随亮色主题（并排看图取色更准，见 tokens.css
+      「固定深色区」整组重映射）；此前的债是「内部令牌都重映射了，容器自身却写死」。
+   ⚠️ 别顺手把它改成 var(--canvas)：二者**不等值**（--canvas 是纯黑，对比页要 .99 近黑透底）。 */
+#cmp{position:fixed;inset:0;z-index:var(--z-full);display:none;flex-direction:column;background:var(--cmp-bg)}
+#cmp.on{display:flex}
+#cmpBar{display:flex;align-items:center;gap:var(--sp-2);padding:var(--sp-2) var(--pad-page);
+  background:var(--panel);border-bottom:1px solid var(--border)}
+/* V4 批次 2：对比条按钮的图标槽 */
+#cmpBar button{display:inline-flex;align-items:center;gap:calc(6px*var(--fsx))}
+#cmpBar .ic{font-size:0;display:flex;align-items:center;justify-content:center}
+#cmpBar .iico{width:calc(15px*var(--fsx));height:calc(15px*var(--fsx))}
+#cmpN{color:var(--tx2);font-size:var(--fs-ui);flex:1;min-width:0}
+#cmpGrid{flex:1;display:grid;gap:var(--sp-2);padding:var(--sp-2);min-height:0}
+#cmpGrid .cp{position:relative;overflow:hidden;background:var(--canvas);border-radius:var(--r-lg);min-height:0}
+#cmpGrid .cp img{width:100%;height:100%;object-fit:contain;display:block;cursor:grab;
+  user-select:none;-webkit-user-drag:none}
+#cmpGrid .cp img.grabbing{cursor:grabbing}
+/* 2026-11-05 P2：压图文字必须用 `--ovl-tx`（恒白）+ 压图渐变令牌。
+   旧写法 `color:var(--tx)` 在**亮色主题**下是深色（#161A22），而
+   `html[data-theme="light"] #lb` 只重映射了 `--lb-bg` / `--lb-top-bg`、没管 `--tx`
+   ⇒ 深字压在 85% 黑渐变上，并排对比模式的文件名基本看不见。 */
+#cmpGrid .cp .cpc{position:absolute;left:0;right:0;bottom:0;padding:calc(14px*var(--fsx)) calc(10px*var(--fsx)) calc(5px*var(--fsx));
+  background:linear-gradient(transparent,var(--cap-veil-deep));color:var(--ovl-tx);text-shadow:var(--ovl-tx-sh);
+  font-size:var(--fs-meta);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#wipeWrap{display:none;flex:1;min-height:0;padding:var(--sp-2)}
+#wipeWrap.on{display:flex;flex-direction:column;gap:var(--sp-2)}
+#wipeStage{position:relative;flex:1;background:var(--canvas);border-radius:var(--r-lg);
+  overflow:hidden;min-height:0}
+#wipeStage img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;
+  cursor:grab;user-select:none;-webkit-user-drag:none}
+#wipeStage img.grabbing{cursor:grabbing}
+/* 滑块擦除：B 的裁切窗。**必须**是不参与 transform 的一层 —— clip-path 先按元素本地
+   坐标裁切、裁完的结果再整体过 transform，所以裁切挂在被 scale 的 img 上时，那条裁切边
+   （= 用户眼里的分割线）会随图一起平移放大：屏幕位置 = W/2 + (X%·W − W/2)·s + tx，
+   而 #wipeHandle 的 left:X% 恒为 X%·W ⇒ 只有 s=1 / tx=0 / X=50% 时两者才重合。
+   下移到这一层后，裁切窗与滑块同处屏幕坐标系、共用同一个百分比基宽（stage 宽）。
+   img 仍 inset:0 填满整层 ⇒ 布局盒与 transform-origin 与改前逐字相同，A/B 仍严格同步。 */
+#wipeBClip{position:absolute;inset:0;pointer-events:none}
+#wipeB{pointer-events:auto}   /* 裁切层关掉命中测试，B 自己开回来（放大后拖拽平移要落到它身上） */
+#wipeHandle{position:absolute;top:0;bottom:0;width:2px;background:var(--ac2);cursor:ew-resize;z-index:var(--z-chip)}
+#wipeHandle::after{content:"";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  width:calc(26px*var(--fsx));height:calc(26px*var(--fsx));border-radius:var(--r-pill);background:var(--panel2);border:1px solid var(--ac2);
+  display:flex;align-items:center;justify-content:center}
+#wipeHandle .knob{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  width:calc(26px*var(--fsx));height:calc(26px*var(--fsx));border-radius:var(--r-pill);
+  display:flex;align-items:center;justify-content:center;   /* V4 批次 2：放大 svg 后改 flex 居中 */
+  background:var(--panel);border:1px solid var(--ac2);color:var(--ovl-tx);pointer-events:none}
+#wipeHandle .knob .iico{width:calc(14px*var(--fsx));height:calc(14px*var(--fsx))}
+#wipeLblA,#wipeLblB{position:absolute;bottom:var(--sp-2);padding:2px var(--sp-2);border-radius:var(--r-sm);
+  background:rgba(var(--ovl-rgb),.72);color:var(--ovl-tx);font-size:var(--fs-meta);max-width:45%;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap;z-index:var(--z-cap)}
+#wipeLblA{left:var(--sp-2)}#wipeLblB{right:var(--sp-2)}
+#wipeHint{text-align:center;font-size:var(--fs-meta);color:var(--tx3);user-select:none}
+
+/* ---------- 单图查看（V2.10.7）----------
+   打开一张库外图片时，大图面板里那些「只对库内条目才有意义」的控件要让位：
+   收藏 / 分类 / 标记 / 打开位置 / 删除 / 翻页 / 胶片条 / 标签面板。
+   统一用 body.solo 关掉，而不是在 JS 里逐个改 style.display —— renderMeta 已经用
+   内联 display 管着「有元数据才显示」那几个按钮（内联优先级更高），两边混着改会打架。
+   「提示词 / 配方 / 复制 / 下载 / 送 ComfyUI」全部保留，那正是这个模式的用途。 */
+#lbSolo{display:none}
+body.solo #lbSolo{
+  display:inline-flex;align-items:center;flex:none;padding:1px var(--sp-2);
+  border-radius:var(--r-pill);background:var(--ac-soft);color:var(--ac-tx);
+  font-size:var(--fs-meta);line-height:1.7;white-space:nowrap;
+}
+body.solo #lbCat, body.solo #lbMark, body.solo #btnFav, body.solo #btnOpenFolder,
+body.solo #btnDel, body.solo #navL, body.solo #navR, body.solo #filmTgl,
+body.solo #lbFilm, body.solo #tagPanel{display:none !important}
+/* 顶栏「刷新」同理：单图看的是库外文件，刷新库目录没有意义 —— 留着就是个死按钮 */
+body.solo #btnRefresh{display:none !important}
+
+/* ============================================================
+   V8 · 详情面板信息分层（体验批次 C）
+   三层卡片：① 总览 ② 生成参数 ③ 原始数据；长提示词折叠 6 行。
+   折叠高度用 6 × --lh-loose × 1em 算（em 跟自身字号），不写死 px —— 150% 字号下
+   行高变大时折叠的仍然是 6 行，不会折错。原始数据仍走 <details>，可复制。
+   ============================================================ */
+#meta .mcard{background:var(--panel2);border:1px solid var(--border);border-radius:var(--r-lg);
+  padding:var(--sp-2) var(--sp-3) var(--sp-3);margin:0 0 var(--sp-3)}
+#meta .mcard:last-child{margin-bottom:0}
+#meta .mh{margin:0 0 var(--sp-1);color:var(--ac-tx);font-weight:var(--fw-semi);font-size:var(--fs-sm)}
+/* 列宽固定（不随内容 auto）——「总览」与「生成参数」是两张卡片，各自的 .mdl 是两个独立 grid；
+   若用 auto，两卡的字段值左缘会差几像素。70px 容得下最长字段名「出图尺寸」（4 字）。 */
+#meta .mdl{margin:0;display:grid;grid-template-columns:calc(70px*var(--fsx)) minmax(0,1fr);
+  column-gap:var(--sp-3);row-gap:calc(3px*var(--fsx))}
+#meta .mrow{display:contents}                 /* dt/dd 直接进两列，行行对齐 */
+#meta .mdl dt{color:var(--tx3);font-size:var(--fs-meta);white-space:nowrap;line-height:var(--lh-body);
+  min-width:0;overflow:hidden;text-overflow:ellipsis}
+#meta .mdl dd{margin:0;color:var(--tx2);font-size:var(--fs-sm);line-height:var(--lh-body);
+  min-width:0;word-break:break-all}
+/* 长文本折叠块 */
+#meta .mfold{margin-top:var(--sp-2)}
+/* 2026-11-04：标题行改**按基线**对齐（原来 align-items:center）。
+   center 对齐的是两个行盒的中心，而计数字号更小（--fs-micro 对 --fs-sm）又是等宽字体，
+   中心对齐后它的小字基线会比标题高约 3px —— 视觉上就是「小字飘在标题上端」。
+   基线对齐后「22,480 字」与「正向提示词」坐在同一条线上；
+   按钮不参与基线（它有自己的边框与内边距），单独改回垂直居中。 */
+#meta .mfhd{display:flex;align-items:baseline;gap:var(--sp-2);margin-bottom:var(--sp-1)}
+#meta .mfhd>span{font-size:var(--fs-sm);color:var(--tx3)}
+#meta .mfbtn{margin-left:auto;height:auto;min-height:0;padding:1px var(--sp-2);align-self:center;
+  font-size:var(--fs-meta);background:var(--panel3);border:1px solid var(--border);
+  border-radius:var(--r-sm);color:var(--tx2);cursor:pointer}
+#meta .mfbtn:hover{color:var(--tx);border-color:var(--border2)}
+/* 2026-11-03：提示词字数（标题右侧小字）。位置靠「自然流」而不是绝对定位 ——
+   .mfbtn 已经用 margin-left:auto 钉在右边，计数留在标题后自然占左侧，
+   两者互不争位；面板内容宽只有 ~300px，nowrap 保证不会被折成第二行。
+   ⚠️ 尺寸带 --fsx（本项目硬约束），字号放大时跟着标题一起放大。 */
+#meta .mfhd>.mfcnt{flex:none;font-size:var(--fs-micro);font-family:var(--mono);
+  color:var(--tx3);opacity:.85;white-space:nowrap;letter-spacing:.02em}
+#meta .mfold>.ptxt{max-height:calc(6*var(--lh-loose)*1em);overflow:hidden}
+#meta .mfold.short>.ptxt,#meta .mfold.open>.ptxt{max-height:none}
+#meta .mfact{text-align:right;margin:calc(2px*var(--fsx)) 0 var(--sp-1)}
+/* 2026-11-07：运行时生成的提示词（打标 / 反推节点）—— 只有解释，没有正文。
+   ⚠️ 不要给它加「正向提示词」这个标题：面板里一旦出现这四个字，用户就会当成可复制的
+      正文去重跑，而那块缓存其实是**上一张图**的标签。标题只许写「节点缓存」。
+   ⚠️ 尺寸一律带 --fsx / --sp-*（本项目硬约束：面板 340px 且字号可调）。 */
+#meta .mnote{margin:var(--sp-2) 0;padding:var(--sp-2) calc(var(--sp-2) + 2px);
+  font-size:var(--fs-sm);line-height:var(--lh-loose);color:var(--tx2);
+  background:var(--warn-bg);border-left:3px solid var(--warn);border-radius:var(--r-sm)}
+#meta .mnote b{color:var(--warn-tx);font-weight:var(--fw-semi)}
+#meta .mnote strong{color:var(--tx);font-weight:var(--fw-semi)}
+/* 说明里出现文件名（krea2_prompts.txt 这类）时给一点等宽底衬，免得和正文混在一起；
+   `word-break:break-all` 是因为面板内容宽仅 ~300px，长文件名会把整块撑出去。 */
+#meta .mnote code{font-family:var(--mono);font-size:0.95em;color:var(--tx);
+  background:var(--panel2);padding:0 3px;border-radius:var(--r-sm);word-break:break-all}
+#meta .mcache{margin-top:var(--sp-1)}
+#meta .mcache .mfhd>span{color:var(--tx3);font-size:var(--fs-meta)}
+/* 2026-11-08：空态（「这张图没有内嵌生成信息」）与读失败也走 .mnote。
+   主句 <b> 用警示色，原因用 .sub 块级第二行（--tx2，不抢主句）。
+   读失败换 .bad = 危险色系 —— 两者结构相同、颜色不同，用户一眼能分开
+   「本来就没有」和「这次没读到」。 */
+#meta .mnote>.sub{display:block;margin-top:calc(2px*var(--fsx));color:var(--tx2)}
+#meta .mnote.bad{background:var(--err-bg);border-left-color:var(--err)}
+#meta .mnote.bad b{color:var(--err-tx)}
+/* 缓存块的收放走**字符截断**（见 viewer.js metaRuntimePrompt），不靠 max-height：
+   `.ptxt` 那条 `6*--lh-loose*1em` 与 pre 的实际行距对不上，收出来总露半截行。
+   内容本身已被截到 200 字，这里只需解掉父级高度限制（字号调大时 200 字可能超 6 行）。 */
+#meta .mcache>.ptxt{max-height:none}
+
+/* ---------- V47（2026-10-08）：LoRA 结构化区块 ----------
+   背景：原来 LoRA 走 .mdl 字段表，`join(", ")` 成一个值 ⇒ 4 个 LoRA 拼 179 字符挤成
+   一坨（实测 93px 高 / 5 行），权重淹没在文本里。现在升格为独立区块：一条一行、
+   权重右锚徽章。视觉基准 = dev/lora_layout_compare.html 的 2-A 列（已 CDP 实测 9/9）。
+   ⚠️ 尺寸一律带 --fsx（本项目硬约束）：面板宽 340px*--fsx，字号放大时行高/徽章同步放大。
+   ⚠️ 名字的省略方向是 **rtl**（`direction:rtl;text-align:left`）：LoRA 名的区分度主要在
+      **尾部**（.safetensors / .pt 之前的版本号、风格词），从左往右截会把最没用的厂商前缀
+      留下、把真正区分的那截截掉。rtl 让省略号落在**中间偏前**，尾部保留。
+      这是刻意的取舍，不是笔误 —— 别"顺手改回 ltr"。 */
+#meta .lorabox{margin-top:var(--sp-2)}
+#meta .lorabox>.lh{display:flex;align-items:center;gap:var(--sp-2);
+  font-size:var(--fs-meta);color:var(--tx3);margin-bottom:calc(4px*var(--fsx))}
+#meta .lorabox>.lh .cnt{font-size:var(--fs-micro);color:var(--tx3);
+  background:var(--panel3);border-radius:var(--r-pill);padding:0 calc(6px*var(--fsx))}
+#meta .lora-row{display:flex;align-items:center;gap:var(--sp-2);
+  padding:calc(3px*var(--fsx)) 0;border-bottom:1px solid var(--border)}
+#meta .lora-row:last-child{border-bottom:0}
+/* 2026-11-11：两站入口改成**一个分段胶囊** `[R│C] ↗`（原先两个文字链接常驻 73.6px）。
+   原来的「RED ↗」「COM ↗」占面板内容宽 23%，且每行重复两个蓝色箭头 —— 视觉噪音大、
+   把名字挤到只剩 ~16 个汉字。现在固定约 44px，两站仍各自可点、各自可聚焦；
+   站点全称与实际状态（直达版本 / 按名搜索）写在 title 与 aria-label 里。
+   箭头用 ::after 装饰（不占 DOM、不可点），点击区只属于两个字母格。 */
+#meta .lora-sites{display:inline-flex;flex:none;align-items:stretch;
+  height:calc(17px*var(--fsx));border:1px solid var(--border2);
+  border-radius:calc(5px*var(--fsx));overflow:hidden;font-size:var(--fs-micro);line-height:1}
+#meta .lora-sites::after{content:"↗";display:inline-flex;align-items:center;
+  padding:0 calc(4px*var(--fsx)) 0 calc(3px*var(--fsx));color:var(--ac-tx);opacity:.7}
+#meta .lora-civitai{flex:none;display:inline-flex;align-items:center;justify-content:center;
+  min-width:calc(15px*var(--fsx));padding:0 calc(2px*var(--fsx));color:var(--ac-tx);
+  text-decoration:none;white-space:nowrap}
+#meta .lora-civitai+.lora-civitai{border-left:1px solid var(--border2)}
+#meta .lora-civitai:hover{background:var(--panel3);text-decoration:none}
+/* 只有「确认没匹配上、只能按名搜」才变淡 —— 匹配成功不改变外观，避免打开瞬间闪一下 */
+#meta .lora-civitai[data-state="search"]{opacity:.7}
+#meta .lora-civitai:focus-visible{outline:2px solid var(--ac);outline-offset:-2px}
+#meta .lora-nm{flex:1;min-width:0;font-size:var(--fs-meta);color:var(--tx2);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  direction:rtl;text-align:left;unicode-bidi:plaintext}
+#meta .lora-nm:hover{color:var(--ac-tx);border-bottom-color:var(--ac)}
+#meta .lora-st{flex:none;font-size:var(--fs-micro);font-family:var(--mono);
+  padding:1px calc(7px*var(--fsx));border-radius:var(--r-pill);
+  background:var(--panel3);color:var(--tx2);border:1px solid var(--border2)}
+
+/* 2026-11-03 · 多段采样流：模型区块 + 采样链路表
+   取代上一版「主行 + 灰小字副行」—— 副行的问题是被关在字段表 dd 里（值列 ~216px），
+   第二段起只能当注解。升格成独立区块后一段一行、全名直出，段号与采样表上下对应。
+   ⚠️ 只在 parsed.models 有 ≥2 段时渲染（后端保证），单模型图的 DOM 与旧版完全一致。
+   ⚠️ 尺寸一律带 --fsx：面板宽 340px*--fsx，字号放大时行高/缩进要同步放大，
+      否则 720p+fsx=2 下相邻行会贴在一起（本项目老坑）。
+   ⚠️ 模型名的省略方向是 rtl（与 .lora-nm 同一理由）：区分度在尾部
+      （_fp8_scaled / _v15_int8_convrot / .safetensors 前的版本号），ltr 会截掉有信息的那截。 */
+#meta .mbx{margin-top:var(--sp-1)}
+#meta .mbx>.lh{display:flex;align-items:center;gap:var(--sp-2);
+  font-size:var(--fs-meta);color:var(--tx3);margin-bottom:calc(4px*var(--fsx))}
+#meta .mbx>.lh .cnt{font-size:var(--fs-micro);color:var(--tx3);
+  background:var(--panel3);border-radius:var(--r-pill);padding:0 calc(6px*var(--fsx))}
+#meta .a1row{display:flex;align-items:center;gap:var(--sp-2);
+  padding:calc(3px*var(--fsx)) 0;border-bottom:1px solid var(--border)}
+#meta .a1row:last-child{border-bottom:0}
+/* 段号方块：与下方采样表的 `.i` 同号，靠位置对应，不靠颜色抢注意力 */
+#meta .sno{flex:none;width:calc(15px*var(--fsx));height:calc(15px*var(--fsx));
+  display:flex;align-items:center;justify-content:center;border-radius:var(--r-sm);
+  background:var(--panel3);color:var(--tx3);font-family:var(--mono);
+  font-size:calc(var(--fs-micro)*.95);line-height:1}
+#meta .a1row.first .sno{background:var(--ac-soft);color:var(--ac-tx)}
+#meta .mbx .nm{flex:1;min-width:0;font-size:var(--fs-meta);color:var(--tx2);cursor:copy;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  direction:rtl;text-align:left;unicode-bidi:plaintext;
+  border-bottom:0}                     /* 覆盖 .cpv 的虚线下划线：一段一行时不需要它 */
+#meta .mbx .nm:hover{color:var(--ac-tx)}
+#meta .mbx .hs{flex:none;font-size:var(--fs-micro);font-family:var(--mono);
+  color:var(--tx3);opacity:.72}
+
+/* ===== 采样链路表 =====
+   列：# / 采样器 / [尺寸] / 步 / CFG / 种子。全部等宽 + tabular-nums，靠列对齐读，
+   不做「每段两行」的堆叠 —— 段数越多优势越明显（6 段时仍只占 6 行）。
+   尺寸列**按情况出现**（.v1）：各段尺寸一致时保持 5 列宽松；只有真的不一致才加列。
+   6 列时列宽是实测出来的（种子 15 位需 80px，采样器列只剩 ~92px），改之前先量。 */
+#meta .sgtab{margin-top:var(--sp-2)}
+#meta .sgtab>.lh{display:flex;align-items:center;gap:var(--sp-2);
+  font-size:var(--fs-meta);color:var(--tx3);margin-bottom:calc(3px*var(--fsx))}
+#meta .sgr{display:grid;
+  grid-template-columns:calc(11px*var(--fsx)) minmax(0,1fr) calc(30px*var(--fsx))
+                        calc(30px*var(--fsx)) calc(86px*var(--fsx));
+  column-gap:calc(4px*var(--fsx));align-items:baseline;
+  padding:calc(2.5px*var(--fsx)) 0;border-bottom:1px solid var(--border)}
+#meta .sgtab.v1 .sgr{grid-template-columns:calc(11px*var(--fsx)) minmax(0,1fr)
+  calc(52px*var(--fsx)) calc(16px*var(--fsx)) calc(18px*var(--fsx)) calc(80px*var(--fsx));
+  column-gap:calc(4px*var(--fsx))}
+#meta .sgr:last-child{border-bottom:0}
+#meta .sgr.head{border-bottom:1px solid var(--border2);padding-bottom:calc(2px*var(--fsx))}
+#meta .sgr.head>span{font-size:calc(var(--fs-micro)*.92);color:var(--tx3);
+  opacity:.62;font-weight:400;letter-spacing:.02em}
+#meta .sgr>span{font-family:var(--mono);font-size:calc(var(--fs-micro)*.98);
+  line-height:var(--lh-body);white-space:nowrap;color:var(--tx2);
+  font-variant-numeric:tabular-nums}
+#meta .sgr>.i{color:var(--tx3);opacity:.75;font-size:calc(var(--fs-micro)*.92)}
+#meta .sgr>.sp{min-width:0;overflow:hidden;text-overflow:ellipsis;direction:rtl;
+  text-align:left;unicode-bidi:plaintext;cursor:copy;border-bottom:0}
+#meta .sgr>.sp:hover{color:var(--ac-tx)}
+#meta .sgr>.sz{text-align:right;color:var(--tx3);font-size:calc(var(--fs-micro)*.95)}
+#meta .sgr>.n{text-align:right}
+#meta .sgr>.sd{text-align:right;padding-left:calc(8px*var(--fsx));
+  color:var(--tx3);font-size:calc(var(--fs-micro)*.9)}
+#meta .sgtab.v1 .sgr>.sd{padding-left:0}
+#meta .sgr.head>.n,#meta .sgr.head>.sd{text-align:right}
+
+
+/* ---------- 合并（V2.12.x）后的补丁：大图顶栏在「大字号 + 1280 视口」下溢出 ----------
+   合并往 `#lb-top .acts` 里加了 `#lbNsfwCls`（内容安全人工归类）。这个按钮只在
+   引擎可用且是媒体文件时才显示，所以装了 onnxruntime 的源码模式 / 用户自己下了模型的
+   exe 都会真的多出一个按钮 —— 720×fsx=2 实测顶栏溢出 9px（`v4_batch2_check` 抓住）。
+   处置：≤1440 只收间距（顶栏 gap 与 .acts 内 gap 各降一档），**不动按钮内边距**，
+   保住设计规范里 32px 控件的手感；按钮本身一个不隐藏。 */
+@media (max-width:1440px){
+  #lb-top{gap:var(--sp-1)}
+  #lb-top .acts{gap:calc(2px*var(--fsx))}
+}
