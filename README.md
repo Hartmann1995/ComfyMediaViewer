@@ -1,5 +1,8 @@
 # ComfyMediaViewer
 
+[![ci](https://github.com/Hartmann1995/ComfyMediaViewer/actions/workflows/ci.yml/badge.svg)](https://github.com/Hartmann1995/ComfyMediaViewer/actions/workflows/ci.yml)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 本地优先的 ComfyUI 出图浏览器。扫描出图目录、网格预览、点开看生成参数，
 支持收藏分类、提示词搜索、重复图检测、抹除元数据下载与回收站删除。
 
