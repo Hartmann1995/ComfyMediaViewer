@@ -61,7 +61,8 @@ python server.py --port 8891
 ### 桌面版
 
 从 [Releases 页面](https://github.com/Hartmann1995/ComfyMediaViewer/releases/latest) 下载
-`ComfyMediaViewer Desktop V<版本>.exe`（单文件，免安装）。
+桌面版 exe（单文件，免安装）。GitHub 附件名不支持空格，因此以连字符代替，
+例如 `ComfyMediaViewer-Desktop-V2.13.5.exe`；下载后可直接双击，也可以改回带空格的名字。
 首次启动会把后端释放到 `%LOCALAPPDATA%\ComfyMediaViewer\backend\` 并复用。
 
 ## 数据与隐私
