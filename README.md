@@ -9,7 +9,8 @@
 后端是单文件 Python（`server.py`，仅标准库 + Pillow），前端是原生 JS / CSS
 （`frontend/`，零构建、零框架），桌面版用 Tauri 2 包一层壳。
 
-> 当前版本 **V2.13.5**。完整变更记录见 [`doc/CHANGELOG.md`](doc/CHANGELOG.md)，
+> 当前版本 **V2.13.5** · [下载桌面版（Windows，单文件免安装）](https://github.com/Hartmann1995/ComfyMediaViewer/releases/latest)。
+> 完整变更记录见 [`doc/CHANGELOG.md`](doc/CHANGELOG.md)，
 > 逐步操作说明见 [`doc/使用说明.md`](doc/使用说明.md)。
 
 ## 功能
@@ -59,7 +60,8 @@ python server.py --port 8891
 
 ### 桌面版
 
-从 Releases 下载 `ComfyMediaViewer Desktop V<版本>.exe`（单文件，免安装）。
+从 [Releases 页面](https://github.com/Hartmann1995/ComfyMediaViewer/releases/latest) 下载
+`ComfyMediaViewer Desktop V<版本>.exe`（单文件，免安装）。
 首次启动会把后端释放到 `%LOCALAPPDATA%\ComfyMediaViewer\backend\` 并复用。
 
 ## 数据与隐私
