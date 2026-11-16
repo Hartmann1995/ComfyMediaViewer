@@ -115,7 +115,7 @@
   <aside id="left">
     <div id="sideBrand"><span class="cube">CF</span><span class="nm">MediaViewer<span class="ver">V2.13.5</span></span></div>
     <div class="lsec grp-first grp-lead" id="posSec" data-grp="nav">
-      <h4><span>位置</span><span class="secar"></span></h4>
+      <h4><span>位置</span><span class="lh-note" id="posCnt"></span><span class="secar"></span></h4>
       <!-- A 方案（2026-10-07 · 用户要求）：位置区去重。
            原来这里有**两处都写着根目录名**（output）—— 上面 `#sideNav` 的根行、
            下面 `#rootBtn` 的按钮，加上顶栏面包屑共三处 ⇒ 用户反馈「一排好几个 output，
@@ -149,7 +149,12 @@
       </div>
     </div>
     <div class="lsec" id="libSec" data-grp="nav">
-      <h4><span>库</span><span class="secar"></span></h4>
+      <!-- 2026-11-16：标题右侧标「全库」—— 本区 6 个数字全部来自 /api/stats 的
+           nav_stats()（根目录含子目录的全局口径），**不随当前目录变化**。
+           下面「格式」区是当前结果集口径、会跟着目录变，两者紧邻容易被读成同一口径
+           （用户实测提问「切目录后库的数字不变」），所以在这里把口径写在明面上；
+           当前目录的张数改由「位置」区标题右侧承担（#posCnt）。 -->
+      <h4><span>库</span><span class="lh-note">全库</span><span class="secar"></span></h4>
       <div id="libNav"></div>
     </div>
     <div class="lsec" id="wfSec" data-grp="nav">
@@ -640,6 +645,24 @@
             <div class="set-row"><span>缩略图 / 查重（图片处理引擎）</span><b id="setPil">—</b></div>
             <div class="set-row"><span>ComfyUI 桥接</span><b id="setBridge">—</b></div>
           </div>
+        </section>
+        <section class="set-grp">
+          <div class="set-gl">项目</div>
+          <div class="about-repo">
+            <!-- 地址由 /api/sysinfo 的 links 回填（单一来源在 server.py），HTML 不写死 -->
+            <code class="about-url" id="setRepoUrl" title="">—</code>
+            <div class="about-acts">
+              <button class="sm" type="button" data-about-open="repo" disabled>在 GitHub 打开</button>
+              <button class="sm" type="button" data-about-copy="repo" disabled>复制地址</button>
+            </div>
+          </div>
+          <div class="about-links">
+            <button class="sm" type="button" data-about-open="releases" disabled>版本发布</button>
+            <button class="sm" type="button" data-about-open="issues" disabled>问题反馈</button>
+            <button class="sm" type="button" data-about-open="license" disabled>MIT 许可</button>
+            <button class="sm" type="button" data-about-open="notice" disabled>模型说明</button>
+          </div>
+          <div class="set-gh">桌面版交给系统默认浏览器打开；局域网访问只提供复制，不会在没人看着的电脑上弹窗。</div>
         </section>
         <section class="set-grp">
           <div class="set-gl">快捷键</div>

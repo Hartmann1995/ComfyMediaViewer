@@ -525,6 +525,12 @@ body.list-view #grid .card.dir .dc{flex:0 0 auto;color:var(--tx3)}
    （原 cfg 档的 --tx3 / 2px 细条已随该组一并删除，本就无元素匹配。） */
 #left .lsec[data-grp="nav"] h4{color:var(--tx)}
 #left .lsec[data-grp="org"] h4::before{opacity:.85}
+/* 2026-11-16：分区标题右侧的「口径标注」——「库 · 全库」「位置 · 当前 N 项」。
+   标题 spans:first-child 已 flex:1 吃掉剩余宽度，标注必须 flex:none 不参与压缩；
+   空内容（顶层不显示当前目录数时）用 :empty 摘掉，免得白占一个 gap。 */
+#left h4 .lh-note{flex:none;font-size:var(--fs-micro);font-weight:var(--fw-semi);
+  color:var(--tx3);letter-spacing:0;white-space:nowrap;font-variant-numeric:var(--num)}
+#left h4 .lh-note:empty{display:none}
 /* V4 批次 4：折叠箭头改用图标槽（伪元素塞不进 svg） */
 #left h4 .secar{flex:none;color:var(--tx3);display:flex;align-items:center;justify-content:center;
   transition:transform var(--dur-fast) var(--ease-std)}

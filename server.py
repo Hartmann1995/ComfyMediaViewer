@@ -71,6 +71,16 @@ CHUNK = 1 << 16
 
 APP_TITLE = "ComfyUI Media Viewer"
 APP_VERSION = "2.13.5"          # 版本号唯一来源（/api/info 与 Server 头都取它）
+# 关于页「项目」链接：**只认枚举 key，接口不接收任意 URL** —— 否则这个端点就成了
+# 「本机任意网址打开器」，能被拿来钓鱼或触发本机协议。新增入口只改这一处，
+# 前端从 /api/sysinfo 的 links 字段取用（不在前端硬编码，避免两处漂移）。
+ABOUT_LINKS = {
+    "repo":     "https://github.com/Hartmann1995/ComfyMediaViewer",
+    "releases": "https://github.com/Hartmann1995/ComfyMediaViewer/releases",
+    "issues":   "https://github.com/Hartmann1995/ComfyMediaViewer/issues",
+    "license":  "https://github.com/Hartmann1995/ComfyMediaViewer/blob/main/LICENSE",
+    "notice":   "https://github.com/Hartmann1995/ComfyMediaViewer/blob/main/models/nsfw/NOTICE.md",
+}
 # 第 22 级 P1-4：桌面壳 spawn 后端时经环境变量给的一次性令牌，由本进程**原样回显**
 # 在每个响应头里，供壳逐字节核对。它不做访问控制（本机模式本来就没有鉴权），
 # 作用是**身份证明**：壳靠它挡掉「端口被别的程序抢注 ⇒ 把陌生页面装进 iframe」。
@@ -13931,6 +13941,34 @@ c.focus();
                 # 不当成失败 —— 用户的诉求是「拿到这份原件」，换个通道照样满足。
                 code = 200 if (r.get("canceled") or r.get("no_dialog")) else 500
                 return self._json(r, code)
+            if u.path == "/api/open_url":
+                # 关于页「项目」入口：桌面壳是 iframe，页面拿不到窗口 API，交给本机
+                # 后端用系统默认浏览器打开。只认枚举 key（ABOUT_LINKS），不接收 URL；
+                # 只给本机 —— 远端点击会在主机屏幕上弹窗，等于静默无效（同 open_external）。
+                if not self._local_direct():
+                    return self._json({"error": "只支持在运行本程序的电脑上打开",
+                                       "reason": "remote"}, 403)
+                try:
+                    d = json.loads(self._post_body or b"{}")
+                    if not isinstance(d, dict):
+                        raise ValueError
+                    k = str(d.get("k") or "")
+                    dry = bool(d.get("dry"))
+                except (ValueError, TypeError):
+                    return self._json({"error": "bad json"}, 400)
+                url = ABOUT_LINKS.get(k)
+                if not url:
+                    return self._json({"error": "unknown link"}, 400)
+                if dry:                       # 门禁 / 自检用：只回地址，不真开浏览器
+                    return self._json({"ok": True, "url": url, "dry": True})
+                try:
+                    if not webbrowser.open(url):
+                        return self._json(
+                            {"error": "无法打开默认浏览器，请复制链接打开"}, 500)
+                except Exception as ex:
+                    return self._json(
+                        {"error": "%s: %s" % (type(ex).__name__, ex)}, 500)
+                return self._json({"ok": True, "url": url})
             if u.path == "/api/open_external":
                 # 大图右键「用默认图片查看器打开」：本机拉起关联程序（远端点了会在
                 # **主机**屏幕上弹窗，等于静默无效，故 403 + 前端不显示）。
@@ -15206,6 +15244,8 @@ def sysinfo() -> dict:
     return {
         "ok": True,
         "version": APP_VERSION,
+        # 关于页的项目入口：地址的唯一来源（前端只展示与复制，不自造）
+        "links": dict(ABOUT_LINKS),
         "has_pil": HAS_PIL,
         "data_dir": str(DATA_DIR),
         "settings_file": str(SETTINGS_FILE),

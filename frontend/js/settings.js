@@ -936,8 +936,34 @@ $("#left").addEventListener("click",e=>{
 });
 
 /* 5. 左栏:位置导航(当前路径层级;子文件夹跳转走网格目录卡/面包屑,不在此列冗余) */
+/* 2026-11-16：「位置」区标题右侧的当前目录张数。
+   背景：左栏「库」的数字全部是**全库**口径（nav_stats()，根目录含子目录），
+   切换目录本来就不该变；而紧邻的「格式」区是当前结果集口径、会跟着目录变 ⇒
+   同一列里两套口径，用户实测提问「切目录后库的数字不变」。
+   处理：库区标题标「全库」，当前目录的张数改由本函数落在「位置」区标题上。
+   口径与网格同源（S.items，/api/list 按「含子文件夹」开关返回），不带任何筛选 ——
+   搜索 / 标签 / 格式勾选都不影响它，避免和「格式」区的可筛张数混淆。
+   跨目录视图（收藏 / 最近使用 / 已标记）下 S.items 不是本目录内容，一律不显示。 */
+let _prevPosCnt = "";
+function syncPosCnt(){
+  const pc=$("#posCnt"); if(!pc) return;
+  const root=S.root||"", cur=S.path||"";
+  const crossView = favMode || libMode==="recent" || libMode==="marked";
+  let txt="", tip="";
+  if(root && cur && normPath(cur)!==normPath(root) && !crossView){
+    txt="当前 "+(S.items||[]).length+" 项";
+    tip="当前目录里的媒体张数（跟随「含子文件夹」开关，不受搜索与筛选影响）。\n"
+       +"左栏「库」那组数字是全库口径，切换目录不会变。";
+  }
+  if(txt===_prevPosCnt && pc.textContent===txt) return;   // 无变化不碰 DOM
+  _prevPosCnt=txt;
+  pc.textContent=txt;
+  if(tip) pc.setAttribute("data-tip", tip); else pc.removeAttribute("data-tip");
+}
+
 function buildSideNav(){
   const nav=$("#sideNav"); if(!nav) return;
+  syncPosCnt();                       // 各分支（顶层 / 子目录 / 换根残留）都要跟着复位
   const root=S.root||"", cur=S.path||"";
   const btn=$("#rootBtn");
   const hint=(btn && btn.querySelector(".rs-hint")) || null;   // A 方案：根目录总数落点
@@ -1416,20 +1442,20 @@ function buildLibNav(){
   const num = v => (!st ? "…" : (_err ? "—" : (_stale ? "≈" : "") + v));
   const rows=[
     ["all","grid","全部", num(st?st.total:0), inDir && libMode==="" && f==="all",
-      "根目录下全部图片和视频（含子目录）" + _tail],
+      "全库 · 根目录下全部图片和视频（含子目录），切换目录不会变" + _tail],
     ["image","image","图片", num(st?st.images:0), inDir && libMode==="" && f==="image",
-      "只显示图片" + _tail],
+      "全库 · 只显示图片（根目录含子目录，切换目录不会变）" + _tail],
     ["video","video","视频", num(st?st.videos:0), inDir && libMode==="" && f==="video",
-      "只显示视频" + _tail],
+      "全库 · 只显示视频（根目录含子目录，切换目录不会变）" + _tail],
     ["workflow","flow","工作流", wf, libMode==="workflow",
       /* B7-P2-5（2026-10-17）：这三个数与「图片」不同源（提示词索引只覆盖
          png/jpg/jpeg/webp），用户会拿两组数相减问「剩下那些去哪了」—— 说清楚口径。 */
-      "按生成参数筛选：有完整工作流 / 只有提示词 / 无生成参数（依赖提示词索引；"
+      "全库 · 按生成参数筛选：有完整工作流 / 只有提示词 / 无生成参数（依赖提示词索引；"
       + "只覆盖 png / jpg / jpeg / webp，gif / bmp 等格式不计入）"],
     ["recent","clock","最近使用", st?st.recent:"…", libMode==="recent",
-      "最近预览 / 下载 / 复制提示词 / 打开过的图（最多 200 条，按路径去重）"],
+      "跨目录 · 最近预览 / 下载 / 复制提示词 / 打开过的图（最多 200 条，按路径去重）"],
     ["marked","flag","已标记", st?st.marked:"…", libMode==="marked",
-      "手动标记的临时状态：待处理 / 待发布 / 待比较 / 待删除（与收藏分开）"],
+      "跨目录 · 手动标记的临时状态：待处理 / 待发布 / 待比较 / 待删除（与收藏分开）"],
   ];
   nav.innerHTML=rows.map(([k,ic,nm,cnt,on,tip])=>
     '<div class="litem'+(on?" on":"")+'" data-k="'+k+'" data-tip="'+esc(tip)+'">'
@@ -1695,6 +1721,10 @@ function _lightTick(){
     _prevPath=p; _prevFavCats=fc; _prevFilter=fl;
     buildSideNav(); buildFavNav();
   }
+  /* 2026-11-16：「位置」区的当前目录张数要在**同目录**内也跟得上 ——
+     删图 / 新增 / 批量操作只改 S.items，不改 S.path，上面的重建条件不会触发。
+     本函数自己比较字符串，值没变就不碰 DOM，每 tick 调用的成本可忽略。 */
+  syncPosCnt();
   /* C-P6 ①：引用未变 ⇒ 内容未变，连 join 都不做 */
   const tref = SUGGEST_TAGS || null;
   if(tref!==_prevTagRef){
@@ -2029,6 +2059,7 @@ window.closeLb=function(){
     }
     if(b) b.disabled = reindexBusy || !!building;
   }
+  let aboutLinks=null;          // 关于页项目链接（/api/sysinfo 下发，前端不自造）
   let sysTok=0;                 // 4.2-2：/api/sysinfo 的世代号（过期响应一律丢弃）
   async function syncSysinfo(){
     const _tok=++sysTok;
@@ -2062,6 +2093,19 @@ window.closeLb=function(){
     setTxt("setVer", "V"+(j.version||""));
     setTxt("setAboutVer", "V"+(j.version||"—"));
     setTxt("setPil", j.has_pil ? "已就绪" : "未安装（缩略图与查重不可用）");
+    /* 关于页项目入口：地址只认后端下发的 links（同「值全部来自 /api/sysinfo」的纪律）。
+       取不到就保持「—」并让按钮继续禁用 —— 宁可点不动，也不给死链。 */
+    aboutLinks = (j.links && typeof j.links === "object") ? j.links : null;
+    const repoUrl = (aboutLinks && aboutLinks.repo) || "";
+    const repoEl = document.getElementById("setRepoUrl");
+    if(repoEl){
+      repoEl.textContent = repoUrl.replace(/^https?:\/\//, "") || "—";
+      repoEl.title = repoUrl;
+    }
+    document.querySelectorAll("[data-about-open],[data-about-copy]").forEach(b=>{
+      const key = b.dataset.aboutOpen || b.dataset.aboutCopy;
+      b.disabled = !(aboutLinks && aboutLinks[key]);
+    });
     /* ---- F28 数据目录位置：分段控件反映**磁盘上的选择** ----
        pending=True 时磁盘选择已改、但这个进程还跑在旧目录（切换后未重启），此时按
        磁盘选择点亮、并在说明里点明「重启后生效」—— 让界面跟着用户刚才的操作走，
@@ -2162,6 +2206,43 @@ window.closeLb=function(){
     }catch(e){ setTxt("setBridge","—"); }
   })();
   setTxt("setDataDir","—");
+  /* ---- 关于页：GitHub 入口 ----
+     打开方式按运行形态分流：
+       · 浏览器顶层页：window.open 新标签（不打断当前页）；
+       · 桌面壳（iframe 内嵌 / Tauri 顶层）：页面拿不到窗口 API，交给本地后端
+         用系统默认浏览器打开。后端只认枚举 key，不接受任意 URL。 */
+  async function aboutOpen(key){
+    const url = aboutLinks && aboutLinks[key];
+    if(!url) return;
+    if(window.self === window.top && !window.__TAURI__){
+      let w = null;
+      try{ w = window.open(url, "_blank"); }catch(e){ w = null; }
+      if(w){ try{ w.opener = null; }catch(e){} return; }
+      /* 弹窗被拦：不装死，退回复制（与局域网「复制地址」同一条出口） */
+      try{ await window.mvCopyText(url); toast("浏览器拦了新窗口，链接已复制","warn"); }
+      catch(e){ toast("请手动复制地址","err"); }
+      return;
+    }
+    try{
+      await api("/api/open_url", {method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({k:key})});
+    }catch(e){
+      try{ await window.mvCopyText(url); toast("没能唤起浏览器，链接已复制","warn"); }
+      catch(_){ toast("打开失败："+e.message,"err"); }
+    }
+  }
+  document.querySelectorAll("[data-about-open]").forEach(b=>{
+    b.addEventListener("click", ()=>aboutOpen(b.dataset.aboutOpen));
+  });
+  document.querySelectorAll("[data-about-copy]").forEach(b=>{
+    b.addEventListener("click", async ()=>{
+      const url = aboutLinks && aboutLinks[b.dataset.aboutCopy];
+      if(!url) return;
+      try{ await window.mvCopyText(url); toast("GitHub 地址已复制","ok"); }
+      catch(e){ toast("复制失败，请手动选中地址","err"); }
+    });
+  });
 
   /* ---- P1-3 回收站自动清理：保留天数可查、可配、可关（0=关闭）----
      此前是写死的 30 天常量，到点就在启动时静默永久删除，用户既不知道也无从关闭。

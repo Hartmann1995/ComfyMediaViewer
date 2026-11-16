@@ -334,3 +334,15 @@ html[data-theme="light"] .tbadge{box-shadow:0 0 0 2px var(--panel)}
 .lan-info .set-kv code{word-break:break-all;white-space:normal;overflow:visible;
   text-overflow:clip;height:auto;min-height:var(--h-ctl-sm);
   padding:calc(2px*var(--fsx)) var(--sp-2);line-height:1.5}
+
+/* ---- 关于页 · 项目入口（2026-11-16）----
+   地址要能整串看清、又受窄抽屉约束：等宽小字 + 单行省略，title 给完整地址，
+   需要时点「复制地址」。按钮组允许换行，窄屏不会挤成一列。 */
+.about-repo{display:flex;flex-direction:column;gap:var(--sp-2);
+  padding:var(--sp-2) var(--sp-3);background:var(--panel2);
+  border:1px solid var(--border);border-radius:var(--r-lg)}
+.about-url{font-family:var(--mono);font-size:var(--fs-meta);color:var(--code-tx);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  user-select:all;-webkit-user-select:all}
+.about-acts,.about-links{display:flex;flex-wrap:wrap;gap:var(--sp-2)}
+.about-links{margin-top:var(--sp-2)}
