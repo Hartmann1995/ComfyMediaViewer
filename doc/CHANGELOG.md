@@ -52,6 +52,13 @@
 > `-test1` 测试包已归档 `backup\desktop-v2135-test1-superseded-20261116\`，
 > `dist-desktop` 收敛回一个 exe。
 
+> **源码同步（tag）**：`v2.13.5` 原本指向首版提交 `b3217e1`（11-15），本次已更新到 `83d4277`
+> —— 即本段文档与重打代码所在的提交。Release 页「Source code (zip / tar.gz)」按 tag 解析，
+> 所以现在下到的源码与附件里的 exe 同源。核对方式：`git ls-remote --tags origin v2.13.5` 返回
+> `83d4277…`；`raw.githubusercontent.com/…/v2.13.5/README.md` 已是 180 行的使用者版，
+> `doc/CHANGELOG.md` 含本段。若需回退到首版源码：
+> `git tag -f v2.13.5 b3217e1 && git push origin refs/tags/v2.13.5 --force`。
+
 ---
 
 ## 已随 V2.13.5 重打包（2026-11-16）· 修复 · 左栏「库」的口径标注 + 当前目录张数（2026-11-16）
