@@ -2102,8 +2102,8 @@ window.closeLb=function(){
       repoEl.textContent = repoUrl.replace(/^https?:\/\//, "") || "—";
       repoEl.title = repoUrl;
     }
-    document.querySelectorAll("[data-about-open],[data-about-copy]").forEach(b=>{
-      const key = b.dataset.aboutOpen || b.dataset.aboutCopy;
+    document.querySelectorAll("[data-about-open]").forEach(b=>{
+      const key = b.dataset.aboutOpen;
       b.disabled = !(aboutLinks && aboutLinks[key]);
     });
     /* ---- F28 数据目录位置：分段控件反映**磁盘上的选择** ----
@@ -2207,10 +2207,12 @@ window.closeLb=function(){
   })();
   setTxt("setDataDir","—");
   /* ---- 关于页：GitHub 入口 ----
-     打开方式按运行形态分流：
+     界面上只有一个「在 GitHub 打开」。打开方式按运行形态分流：
        · 浏览器顶层页：window.open 新标签（不打断当前页）；
        · 桌面壳（iframe 内嵌 / Tauri 顶层）：页面拿不到窗口 API，交给本地后端
-         用系统默认浏览器打开。后端只认枚举 key，不接受任意 URL。 */
+         用系统默认浏览器打开。后端只认枚举 key，不接受任意 URL。
+     两条路都走不通时退回复制 —— 不设独立的「复制地址」按钮，地址本身可选中，
+     多一个按钮只是把一栏塞满。 */
   async function aboutOpen(key){
     const url = aboutLinks && aboutLinks[key];
     if(!url) return;
@@ -2234,14 +2236,6 @@ window.closeLb=function(){
   }
   document.querySelectorAll("[data-about-open]").forEach(b=>{
     b.addEventListener("click", ()=>aboutOpen(b.dataset.aboutOpen));
-  });
-  document.querySelectorAll("[data-about-copy]").forEach(b=>{
-    b.addEventListener("click", async ()=>{
-      const url = aboutLinks && aboutLinks[b.dataset.aboutCopy];
-      if(!url) return;
-      try{ await window.mvCopyText(url); toast("GitHub 地址已复制","ok"); }
-      catch(e){ toast("复制失败，请手动选中地址","err"); }
-    });
   });
 
   /* ---- P1-3 回收站自动清理：保留天数可查、可配、可关（0=关闭）----

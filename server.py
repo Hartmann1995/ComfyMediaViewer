@@ -74,12 +74,12 @@ APP_VERSION = "2.13.5"          # 版本号唯一来源（/api/info 与 Server �
 # 关于页「项目」链接：**只认枚举 key，接口不接收任意 URL** —— 否则这个端点就成了
 # 「本机任意网址打开器」，能被拿来钓鱼或触发本机协议。新增入口只改这一处，
 # 前端从 /api/sysinfo 的 links 字段取用（不在前端硬编码，避免两处漂移）。
+# 关于页「项目」只有仓库地址这一个入口，此处是地址的唯一来源（前端只展示，不自造）。
+# 2026-11-16 把 releases / issues / license / notice 四个次级入口删掉了：设置页的
+# 「关于」是看版本、看环境的地方，铺五个按钮等于把它做成了书签栏。
+# 保留枚举结构（而不是直接写字符串）是为了让 /api/open_url 继续只认 key，不接受任意 URL。
 ABOUT_LINKS = {
-    "repo":     "https://github.com/Hartmann1995/ComfyMediaViewer",
-    "releases": "https://github.com/Hartmann1995/ComfyMediaViewer/releases",
-    "issues":   "https://github.com/Hartmann1995/ComfyMediaViewer/issues",
-    "license":  "https://github.com/Hartmann1995/ComfyMediaViewer/blob/main/LICENSE",
-    "notice":   "https://github.com/Hartmann1995/ComfyMediaViewer/blob/main/models/nsfw/NOTICE.md",
+    "repo": "https://github.com/Hartmann1995/ComfyMediaViewer",
 }
 # 第 22 级 P1-4：桌面壳 spawn 后端时经环境变量给的一次性令牌，由本进程**原样回显**
 # 在每个响应头里，供壳逐字节核对。它不做访问控制（本机模式本来就没有鉴权），
