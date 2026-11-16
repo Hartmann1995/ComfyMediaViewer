@@ -75,6 +75,9 @@ doc/*
 !doc/CHANGELOG.md
 !doc/使用说明.md
 !doc/CIVITAI_LINKS.md
+# README 用的截图（WebP，合计约 0.6 MB）：由 dev/_readme_shot.py 生成
+!doc/images/
+!doc/images/*.webp
 
 # 开发期一次性脚本与残留
 b12_io.py
