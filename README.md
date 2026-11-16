@@ -224,17 +224,17 @@ python server.py --port 8765 --root "D:\ComfyUI\output"
 
 ```mermaid
 flowchart LR
-  UI["浏览器 / 桌面壳<br/>原生 JS 前端"]
+  UI["前端<br/>原生 JS / CSS"]
   API["server.py<br/>单文件后端"]
-  IDX["提示词索引<br/>prompt_index.json"]
-  CACHE["缩略图与查重缓存<br/>LOCALAPPDATA"]
-  FS["出图目录 只读"]
-  CU["ComfyUI 页面<br/>可选桥接"]
+  IDX["提示词索引"]
+  CACHE["缩略图缓存"]
+  FS["出图目录<br/>只读"]
+  CU["ComfyUI 页面"]
 
   UI -->|"HTTP + JSON"| API
   API --> IDX
   API --> CACHE
-  API -->|"扫描 · 读取元数据"| FS
+  API -->|"扫描 · 读元数据"| FS
   API -.->|"回传工作流"| CU
 ```
 
