@@ -3303,12 +3303,23 @@ def _is_non_prompt_key(k) -> bool:
 # 不是当前这张图用的正向提示词；产出结果由下游文本框缓存，已由 visit 收到。
 # 这类节点整体剪枝 —— 光靠键名拦不住把指令写在 prompt / 提示词 里的实现。
 _GEN_NODE_HINTS = ("imginfer", "imageinfer", "caption", "tagger", "wd14",
-                   "florence", "joycaption", "interrogator", "反推")
+                   "florence", "joycaption", "interrogator", "反推",
+                   # LLM 扩写节点（PromptExpand 等）：它的 `custom_rule_content` /
+                   # `rule` 是给模型的**指令模板**，真正送进采样器的是运行时生成的
+                   # 那一段（PNG 里不存在）。2026-11-23 实测 AG_1780837….png：13 张
+                   # 同类图的正向因此被灌进 5300 字「你是一位专业的NSFW随机提示词
+                   # 生成器…」，这是把模板当正文，比读空更糟。
+                   "promptexpand", "扩写")
+# LLM 调用节点类名里的 `llm` 要**独立成词**（zml_llm / llmnode / llm_loader），
+# 不能简单子串匹配 —— fullmoon 这类名字里也藏着 "llm"，误剪会连带它的上游一起丢。
+_LLM_NODE_RE = re.compile(r"(?:^|[^a-z])llm(?:[^a-z]|$)")
 
 
 def _is_gen_node(n) -> bool:
     ct = _ct_key(n)
-    return any(h in ct for h in _GEN_NODE_HINTS)
+    if any(h in ct for h in _GEN_NODE_HINTS):
+        return True
+    return _LLM_NODE_RE.search(ct) is not None
 
 
 # 「运行时算出来的提示词」节点把**上一次**的执行结果写回自己的 widget，
@@ -3854,6 +3865,18 @@ def parse_comfy_prompt(obj: dict) -> dict:
                 # 2026-10-06 实测：漏了 string 会让 Krea2 + TE_MAN 工作流读不到正文 ——
                 # 首轮收不到文本 ⇒ 回退收「显示节点缓存」⇒ 界面显示上一张图的提示词。
                 cand = keys + ("value", "string")
+            if "textinput" in ct:
+                # ZML_TextInput（「文本输入」节点）的正文放在**中文字段 `文本`**。
+                # 2026-11-23 用户反馈 03900BAB….png：链路是
+                #   KSampler.positive → WeiLinPromptUI.positive → ZML_SelectText
+                #   → ZML_TextInput ×3（画质前缀 / 本体提示词 / 幼态开关）
+                # 三段都在 `文本` 里，候选字段一个都命中不了 ⇒ 正向整段消失，
+                # 而唯一的 CLIPTextEncode 装的是**负向**，界面就成了「读不出正向提示词」。
+                # ⚠️ 绝不能改用 ShowText 的 text_0 兜底：那张图的 text_0 是**上一轮**
+                # 的显示缓存（实测 1882 字里没有本图的提示词），拿来就是错的正文。
+                # 只认 class_type 含 textinput 的节点，`文本` 这个键名太泛，
+                # 不做限制会把别家节点的说明文字当正文收进来。
+                cand = cand + ("文本",)
             if "triggerword" in ct:
                 # LoraManager TriggerWord Toggle：LoRA 触发词放在 orinalMessage
                 # （字段名就是少一个 g 的拼写，值与其前端 active 词表一致）。
@@ -6932,7 +6955,12 @@ def thumb_for(p: Path, size: int = 320):
 
 IDX_FILE = DATA_DIR / "prompt_index.json"
 IDX_IMG_EXTS = (".png", ".jpg", ".jpeg", ".webp")   # 参与提示词索引的格式
-PARSER_VER = 22         # 解析逻辑变更时 +1，使旧缓存整体失效重建
+PARSER_VER = 23         # 解析逻辑变更时 +1，使旧缓存整体失效重建
+                        # 23（2026-11-23）：ZML_TextInput（「文本输入」）的正文在中文字段
+                        #   `文本`，此前不在候选字段里 ⇒ 走 WeiLinPromptUI + ZML_SelectText
+                        #   的工作流正向整段丢失（唯一 CLIPTextEncode 装的是负向，界面症状
+                        #   就是「读不出正向提示词」）。索引里 `pos` 为空的记录是旧口径 ⇒
+                        #   不升版则那批图永远搜不到、面板永远空着。
                         # 22（2026-11-15）：显示类节点（TE_text_display）不再用 API 里的
                         #   `inputs.text`（那是**上一次**的显示串，带 POSITIVE/NEGATIVE/
                         #   SETTINGS 模板），改为优先取 workflow properties 里的本次副本。
