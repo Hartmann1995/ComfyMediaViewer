@@ -4,6 +4,48 @@
 
 ---
 
+> ## 🔧 未发版 · 修复 · 多段工作流的 LoRA 只读到第一段（2026-11-24）
+
+> **现象**：主人拿来一张 2016×2016 的双模型图（MOSS 起稿 → Krea 收尾），详情面板只列出 **2 条 LoRA**，
+> 而工作流里实际有 6 条：Krea 那一侧的 4 条（`6767` / `676767` / `67676767` / `6767676767`）
+> 一条都没出现，Krea 加速 LoRA 也没出现。
+
+> **原因一（漏）**：LoRA 只从**主采样器**那条 `model` 链走一次。两段式工作流里第二段挂在另一条链上 ——
+> `KSampler#63.model → LoraManager#24 → Switch#113 → LoraLoaderModelOnly#26 → UNETLoader#34`，
+> 第一段那条链压根走不到这里。
+
+> **原因二（多，且是错的）**：`on_true` / `on_false` 型开关（`ComfySwitchNode`）两个分支一起走。
+> 这张图有四处这样的开关（基础/微调、快速模式、原版配方/官方加速），于是
+> 关闭臂上的 `moss_sft_8step_dmd_lora` 被收了进来，`model` 也记成了没跑过的 `moss_image_sft…`
+> （#8 = true，实际跑的是 `moss_image_base_bf16`）。
+
+> **修法三处**：
+> ① `_lora_entries_from_loader` 把四条来源分支（`loras` 数组 / rgthree `lora_N` / `lora_name` /
+>    JSON 槽位表）从 `visit_m` 里抽出来，供跨段复用；强度是连线引用时用 `resolve_num` 解出真实值
+>    （`strength_model: ["18", 0]` → 0.6，早先显示成空）；
+> ② LoRA 收集改为「**每段采样器各走一遍自己的 model 链**」，按 stage 顺序合并、按文件去重；
+> ③ `_switch_pick` / `_model_ref_filter`：`on_true`/`on_false` 开关能静态解出布尔值就只走选中那一臂，
+>    主链、`_sampler_model`、跨段补齐三处都用它。解不出来（运行时才知道）就**不替它选择**，两臂都收。
+
+> **结果 · 用户样图**：`loras` 2 → **6 条**（`67 (0.7)` + Krea 四条 + `krea2_turbo_lora (0.6)`），
+> 不含 `moss_sft`；`model` 改为 `moss_image_base_bf16.safetensors`；
+> `models` 两段 = `moss_image_base_bf16` + `krea2_raw_fp8_scaled`（原先误记成 `krea2_turbo_fp8`）。
+
+> **全库回归**：12076 张 PNG 逐图比对旧（r23）新（r24）解析器，**差异 0** ——
+> 这类开关与双模型结构在存量图里只出现在 106 张上，且它们的 LoRA / 模型本来就读得一样，
+> 说明本批只补了缺的那一侧，没有改动别的图的既有口径。
+
+> **PARSER_VER 23 → 24**：索引里 `model` / `loras` 是旧口径，不升版则搜索与筛选仍按旧值。
+
+> **门禁** `tests/prompt_lora_multistage_20261124_check.py`：**15 PASS / 0 FAIL**。
+> 负控（`dev/_negctl_lora_multistage_20261124.py`）四个注入点各自翻红并复绿：
+> N1 跨段遍历置空 ⇒ A1/B1 等 6 条红；N2 剪枝恒真 ⇒ A3/A4/A6/B1/B2/B4 红；
+> N3 强度不解析 ⇒ A5/B3 红；N4 关去重 ⇒ A8 红。还原后源码与注入前逐字节相同。
+> 既有解析门禁复跑无回归：slottxt 17/0、purity ALL PASS、textn 11/0、switch 15/0、
+> wildcard 26/0、runtime 49/0、stringfield 31/0、zmltext 21/0。
+
+---
+
 > ## 🔧 未发版 · 修复 · 「文本输入」节点的正向提示词读不出来（2026-11-23）
 
 > **现象**：主人拿来一张 2160×3840 的图，详情面板里模型 / 采样器 / 步数 / CFG / 种子 / 负向提示词

@@ -3070,6 +3070,78 @@ def _lora_add(names: list, v: str) -> bool:
     return True
 
 
+def _lora_entries_from_loader(n, num_resolve=None):
+    """从一个 LoRA 加载/堆叠节点取出**已启用**的条目文本（形如 `名字 (0.7)`）。
+
+    四条来源按优先级依次尝试，命中即止（口径与 2026-11 之前内联在 visit_m 里的
+    那段完全一致，只是抽出来给「跨段补齐」复用）：
+
+      1. `loras` 数组（LoraManager）：`[{name, strength, active}, …]`
+      2. rgthree Power Lora Loader：`lora_1..lora_N` = `{on, lora, strength}`
+      3. 常规 ComfyUI：`lora_name` / `lora_name_2` + `strength_model`
+      4. 槽位表被 `json.dumps` 塞进字符串（VisualLoRALoader 的 `lora_data`）
+
+    ⚠️ 强度可能是**连线引用**（`strength_model: ["18", 0]` 指向 PrimitiveFloat）。
+       不传 `num_resolve` 时这种情况只是不显示强度；传了（`resolve_num`）就能取到
+       真实数值 —— 实测 414456A5… 的 Krea 加速 LoRA 强度是 0.6，早先显示成空。
+    """
+    i2 = _inp(n)
+    out = []
+
+    lv = i2.get("loras")
+    if isinstance(lv, dict):                      # LoraManager: {"__value__": [...]}
+        lv = lv.get("__value__")
+    if isinstance(lv, list):
+        for e in lv:
+            if isinstance(e, dict) and isinstance(e.get("name"), str):
+                if not _entry_active(e):          # 跳过未启用的槽位
+                    continue
+                st = _strength_fmt(e.get("strength", e.get("strengthModel")))
+                out.append(e["name"] + (f" ({st:g})" if st is not None else ""))
+    if out:
+        return out
+
+    for k, v in i2.items():                       # rgthree Power Lora Loader
+        if (re.fullmatch(r"lora(_\d+)?", k) and isinstance(v, dict)
+                and isinstance(v.get("lora"), str)):
+            if not _entry_active(v):
+                continue
+            st = _strength_fmt(v.get("strength"))
+            out.append(v["lora"] + (f" ({st:g})" if st is not None else ""))
+    if out:
+        return out
+
+    for k, v in i2.items():                       # 常规格式: lora_name / lora_name_2
+        if re.fullmatch(r"lora_name(_\d+)?", k) and isinstance(v, str):
+            raw = i2.get("strength_model" if k == "lora_name" else
+                         "strength_model" + (k[len("lora_name"):]))
+            st = _strength_fmt(raw)
+            if st is None and num_resolve is not None:
+                st = _strength_fmt(num_resolve(raw, ("value", "float", "strength_model")))
+            out.append(v + (f" ({st:g})" if st is not None else ""))
+    if out:
+        return out
+
+    for k, v in i2.items():                       # 槽位表被 JSON.stringify 成字符串
+        if "lora" not in k.lower():
+            continue
+        # WeiLinPromptUI 的 `temp_lora_str` 是前端「待加入」的暂存区，
+        # 里面是**下一堆要加的槽位 + 已生效那一堆的副本**；真正被执行的是
+        # `lora_str`（见 load_lora_ing：只解析 lora_str）。两个都收会出重复，
+        # 2026-11-08 实测 Anima_00126_：15 条里有 10 条是重复项。
+        if _flat_key(k).startswith(("temp", "tmp", "draft", "pending")):
+            continue
+        ents = _lora_entries_from_json(v)
+        if not ents:
+            continue
+        for e in ents:
+            if not _entry_active(e):
+                continue
+            st = _entry_strength(e)
+            out.append(e["name"] + (f" ({st:g})" if st is not None else ""))
+    return out
+
+
 def _is_lora_slot_node(ct_key: str, inputs: dict) -> bool:
     """带 LoRA 槽位的加载/堆叠节点：其 text 槽位存的是 <lora:...> 语法，不是提示词。
 
@@ -4164,6 +4236,56 @@ def parse_comfy_prompt(obj: dict) -> dict:
                 # 界面据此把「正向提示词」的头衔从断言改成「这只是文件里那一段」
                 s["positive_partial"] = True
 
+    def _switch_pick(n):
+        """`on_true` / `on_false` 型开关当前**静态**选中的那一路 → 'on_true'/'on_false'。
+
+        ComfySwitchNode 这类节点（KJNodes 等）用一个布尔输入 `switch` 决定走哪一路，
+        取值常常也是一条连线（指向 PrimitiveBoolean）。能静态解出来就只走那一路 ——
+        否则两条分支会被一起走：实测 414456A5… 有四处这样的开关，两条臂上各挂着一份
+        模型与 LoRA（基础/微调、快速模式、原版配方/官方加速），不剪枝就会读到
+        「这张图没用过的 LoRA」和「没用过的底模」。
+        解不出来（运行时才知道 / 没有这两个输入口）返回 None，表示不替它做选择。
+        """
+        i2 = _inp(n)
+        if "on_true" not in i2 or "on_false" not in i2:
+            return None
+        v = i2.get("switch")
+        for _ in range(8):                    # 沿连线取字面量，带防环上限
+            if isinstance(v, bool):
+                return "on_true" if v else "on_false"
+            if isinstance(v, (int, float)):
+                return "on_true" if v else "on_false"
+            if isinstance(v, str):
+                low = v.strip().lower()
+                if low in ("true", "1", "yes", "on"):
+                    return "on_true"
+                if low in ("false", "0", "no", "off"):
+                    return "on_false"
+                return None
+            if isinstance(v, list) and v and isinstance(v[0], str):
+                up = obj.get(v[0])
+                if not isinstance(up, dict):
+                    return None
+                ui = _inp(up)
+                nxt = None
+                for _nk in ("value", "boolean", "bool"):
+                    if ui.get(_nk) is not None:
+                        nxt = ui[_nk]
+                        break
+                if nxt is None or nxt is v:
+                    return None
+                v = nxt
+                continue
+            return None
+        return None
+
+    def _model_ref_filter(n, k):
+        """model 链回溯时，开关只走静态选中的那一臂。"""
+        pick = _switch_pick(n)
+        if pick is None:
+            return True
+        return k == pick
+
     model_ref = next((ref(k) for k in ("model", "modelname", "ckpt_name", "unet_name")
                       if ref(k)), None)
     if model_ref is None:
@@ -4177,58 +4299,19 @@ def parse_comfy_prompt(obj: dict) -> dict:
             ct = _ct_key(n)
             i2 = _inp(n)
             if "lora" in ct and "trigger" not in ct:
-                got = False
-                lv = i2.get("loras")
-                if isinstance(lv, dict):                      # LoraManager: {"__value__": [...]}
-                    lv = lv.get("__value__")
-                if isinstance(lv, list):
-                    for e in lv:
-                        if isinstance(e, dict) and isinstance(e.get("name"), str):
-                            if not _entry_active(e):          # 跳过未启用的槽位
-                                continue
-                            st = _strength_fmt(e.get("strength", e.get("strengthModel")))
-                            loras.append(e["name"] + (f" ({st:g})" if st is not None else ""))
-                            got = True
-                if not got:
-                    for k, v in i2.items():                   # rgthree Power Lora Loader: lora_1..lora_N
-                        if (re.fullmatch(r"lora(_\d+)?", k) and isinstance(v, dict)
-                                and isinstance(v.get("lora"), str)):
-                            if not _entry_active(v):
-                                continue
-                            st = _strength_fmt(v.get("strength"))
-                            loras.append(v["lora"] + (f" ({st:g})" if st is not None else ""))
-                            got = True
-                if not got:
-                    for k, v in i2.items():                   # 常规格式: lora_name / lora_name_2
-                        if re.fullmatch(r"lora_name(_\d+)?", k) and isinstance(v, str):
-                            st = i2.get("strength_model" if k == "lora_name" else
-                                        "strength_model" + (k[len("lora_name"):]))
-                            st = _strength_fmt(st)
-                            loras.append(v + (f" ({st:g})" if st is not None else ""))
-                if not got:
-                    for k, v in i2.items():                   # 槽位表被 JSON.stringify 成字符串
-                        if "lora" not in k.lower():           # （VisualLoRALoader 的 lora_data）
-                            continue
-                        # WeiLinPromptUI 的 `temp_lora_str` 是前端「待加入」的暂存区，
-                        # 里面是**下一堆要加的槽位 + 已生效那一堆的副本**；真正被执行的是
-                        # `lora_str`（见 load_lora_ing：只解析 lora_str）。两个都收会出重复，
-                        # 2026-11-08 实测 Anima_00126_：15 条里有 10 条是重复项。
-                        if _flat_key(k).startswith(("temp", "tmp", "draft", "pending")):
-                            continue
-                        ents = _lora_entries_from_json(v)
-                        if not ents:
-                            continue
-                        for e in ents:
-                            if not _entry_active(e):          # 跳过未启用的槽位
-                                continue
-                            st = _entry_strength(e)
-                            loras.append(e["name"] + (f" ({st:g})" if st is not None else ""))
-                            got = True
+                # 四条来源分支已抽到模块级 `_lora_entries_from_loader`（跨段补齐要复用），
+                # 这里只负责接到 `loras` 上；强度是连线引用时用 resolve_num 解出数值。
+                for _t in _lora_entries_from_loader(n, resolve_num):
+                    loras.append(_t)
             elif "checkpointloader" in ct and isinstance(i2.get("ckpt_name"), str):
                 ckpt.append(i2["ckpt_name"])
             elif "unetloader" in ct and isinstance(i2.get("unet_name"), str):
                 ckpt.append(i2["unet_name"])
-        _walk_nodes(model_ref, obj, visit_m)
+        # 主链也按开关的静态选择剪枝（`_model_ref_filter`）：不剪的话两臂会一起走，
+        # ckpt[0] 取决于 DFS 撞见顺序 —— 实测 414456A5… 的 MOSS 基础/微调开关为 true
+        # （该用 base），却因为 on_false 那条被先撞到而记成了 sft，连带把这一臂上的
+        # moss_sft 加速 LoRA 也收了进来。
+        _walk_nodes(model_ref, obj, visit_m, ref_filter=_model_ref_filter)
         if ckpt:
             s["model"] = ckpt[0]
         if loras:
@@ -4279,7 +4362,10 @@ def parse_comfy_prompt(obj: dict) -> dict:
             elif "unetloader" in ct and isinstance(i3.get("unet_name"), str):
                 got.append(i3["unet_name"].strip())
 
-        _walk_nodes(rid, obj, _v)
+        # 开关（on_true/on_false）只走静态选中的那一臂：不剪的话 DFS 会先撞到
+        # on_false 分支上的 loader —— 实测 414456A5… 原版配方开关为 true 时，
+        # 这一段本该是 krea2_raw_fp8_scaled，却显示成 krea2_turbo_fp8。
+        _walk_nodes(rid, obj, _v, ref_filter=_model_ref_filter)
         # got[0] = 离采样器最近的那个 loader（DFS 先走 model 分支）—— 那才是这一段
         # 实际吃进去的权重；再往上游的 base 模型只算「用来拼的原料」。
         return next((x for x in got if x), None)
@@ -4397,6 +4483,42 @@ def parse_comfy_prompt(obj: dict) -> dict:
                 _e.update(_p)
                 _out.append(_e)
             s["models"] = _out
+
+        # ---- LoRA 跨段补齐（2026-11-24）----
+        # 上面 visit_m 只从**主采样器**那条 model 链走一次。两段式工作流（先 MOSS 起稿、
+        # 再 Krea 收尾）的第二段是另一条链，那侧的 LoRA 全丢 —— 实测 414456A5…：图里
+        # 6 条（MOSS 侧 1 + Krea LoraManager 4）只读到 2 条，界面看着像「LoRA 没读对」。
+        # 顺序按 `_seq`（stage 1..N），同段内保持 DFS 顺序；结果用 `_lora_add` 按文件去重。
+        _mr_seen = {model_ref} if isinstance(model_ref, str) else set()
+        _extra = []
+        for _nm2, _nd2 in _seq:
+            if _nd2 is None:
+                continue
+            _i4 = _inp(_nd2)
+            _mr2 = None
+            for _k2 in ("model", "modelname", "ckpt_name", "unet_name"):
+                _v2 = _i4.get(_k2)
+                if isinstance(_v2, list) and _v2 and isinstance(_v2[0], str):
+                    _mr2 = _v2[0]
+                    break
+            if not _mr2 or _mr2 in _mr_seen:
+                continue
+            _mr_seen.add(_mr2)
+
+            def _visit_extra(n2):
+                _ct2 = _ct_key(n2)
+                if "lora" not in _ct2 or "trigger" in _ct2:
+                    return
+                for _t2 in _lora_entries_from_loader(n2, resolve_num):
+                    _lora_add(_extra, _t2)
+
+            _walk_nodes(_mr2, obj, _visit_extra, ref_filter=_model_ref_filter)
+        if _extra:
+            _merged = list(s.get("loras") or [])
+            for _t2 in _extra:
+                _lora_add(_merged, _t2)
+            s["loras"] = _merged
+
 
     # WeiLinPromptUI：LoRA 既不在 <wlr:…> 标签里，也不在模型链的加载器节点上，而是整张
     # 槽位表 json.dumps 进 `lora_str`（独立节点，opt_model 只是引用 UNETLoader）。上面
@@ -6955,7 +7077,13 @@ def thumb_for(p: Path, size: int = 320):
 
 IDX_FILE = DATA_DIR / "prompt_index.json"
 IDX_IMG_EXTS = (".png", ".jpg", ".jpeg", ".webp")   # 参与提示词索引的格式
-PARSER_VER = 23         # 解析逻辑变更时 +1，使旧缓存整体失效重建
+PARSER_VER = 24         # 解析逻辑变更时 +1，使旧缓存整体失效重建
+                        # 24（2026-11-24）：LoRA 改为「每段采样器各走一遍 model 链」，
+                        #   并对 on_true/on_false 型开关（ComfySwitchNode）按静态选择剪枝。
+                        #   两段式工作流（先 MOSS 起稿、再 Krea 收尾）第二段挂在另一条链上，
+                        #   此前那侧的 LoRA 一条都读不到（实测一张图 6 条只显示 2 条）；
+                        #   不剪开关则会反过来把「这张图没走过的臂」上的模型与 LoRA 收进来。
+                        #   索引里 `model` / `loras` 是旧口径 ⇒ 不升版则搜索与筛选仍按旧值。
                         # 23（2026-11-23）：ZML_TextInput（「文本输入」）的正文在中文字段
                         #   `文本`，此前不在候选字段里 ⇒ 走 WeiLinPromptUI + ZML_SelectText
                         #   的工作流正向整段丢失（唯一 CLIPTextEncode 装的是负向，界面症状
