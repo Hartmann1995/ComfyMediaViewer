@@ -3070,20 +3070,41 @@ def _lora_add(names: list, v: str) -> bool:
     return True
 
 
-def _lora_entries_from_loader(n, num_resolve=None):
+# LoRA 语法串（`<lora:名字:强度>`）可能藏在哪些输入键里：
+#   · LoraManager「LoRA Text Loader」→ `lora_syntax`（实测 a958e402…）
+#   · WeiLinPromptUI / 其它 → `lora_str` / `lora_text` / `lora_tags`
+# 这里放得很宽（键名含 lora/lyco/wlr 就算），因为：
+#   ① 前四条来源命中就 return 了，走到这里时槽位表 / lora_name 都不存在；
+#   ② 取到的文本必须含 `<` 才解析，`lora_name` 这类纯文件名的连线解出来也进不去；
+#   ③ 刻意**不包含 `text`** —— LoraManager 的 text 是「用过的全部标签」快照，
+#      关掉的槽位标签也在里面，扫它会报出没生效的 LoRA（2026-11-11 幻觉条目那类）。
+_LORA_SYNTAX_KEYS_RE = re.compile(r"lora|lyco|wlr", re.I)
+
+
+def _lora_entries_from_loader(n, num_resolve=None, resolve_str=None):
     """从一个 LoRA 加载/堆叠节点取出**已启用**的条目文本（形如 `名字 (0.7)`）。
 
-    四条来源按优先级依次尝试，命中即止（口径与 2026-11 之前内联在 visit_m 里的
+    五条来源按优先级依次尝试，命中即止（口径与 2026-11 之前内联在 visit_m 里的
     那段完全一致，只是抽出来给「跨段补齐」复用）：
 
       1. `loras` 数组（LoraManager）：`[{name, strength, active}, …]`
       2. rgthree Power Lora Loader：`lora_1..lora_N` = `{on, lora, strength}`
       3. 常规 ComfyUI：`lora_name` / `lora_name_2` + `strength_model`
       4. 槽位表被 `json.dumps` 塞进字符串（VisualLoRALoader 的 `lora_data`）
+      5. **LoRA 语法串**（2026-11-25）：节点上某个名字含 lora/lyco 的输入里存的是
+         `<lora:名字:强度>` 文本 —— 典型是 LoraManager 的「LoRA Text Loader」，
+         它只有 `lora_syntax` 一个**连线**输入，真正的清单在
+         PrimitiveStringMultiline 的 `value` 里（实测 a958e402…：9 条一条都读不到，
+         界面只显示另一个 LoraLoaderModelOnly 的 1 条，看着像「LoRA 读错」）。
 
     ⚠️ 强度可能是**连线引用**（`strength_model: ["18", 0]` 指向 PrimitiveFloat）。
        不传 `num_resolve` 时这种情况只是不显示强度；传了（`resolve_num`）就能取到
        真实数值 —— 实测 414456A5… 的 Krea 加速 LoRA 强度是 0.6，早先显示成空。
+    ⚠️ 第 5 条必须传 `resolve_str`（parse_comfy_prompt 里那个沿连线取字符串的本地
+       函数）；不传就只认字面量，连线形态的语法槽位仍然读不到。
+    ⚠️ 第 5 条**只扫键名含 lora/lyco/wlr 的输入，绝不扫 `text`**：LoraManager 的
+       `text` 槽位是「加过的 LoRA 全留在里面」的快照，关掉的槽位标签也在，扫它会
+       把未启用的 LoRA 当生效项报出来（即 2026-11-11「读出根本没有的 LoRA」那类幻觉）。
     """
     i2 = _inp(n)
     out = []
@@ -3139,6 +3160,26 @@ def _lora_entries_from_loader(n, num_resolve=None):
                 continue
             st = _entry_strength(e)
             out.append(e["name"] + (f" ({st:g})" if st is not None else ""))
+    if out:
+        return out
+
+    # ---- 来源 5：LoRA 语法串（`<lora:名字:强度>`）-----------------------------
+    # 只看键名像「LoRA 语法槽位」的输入（lora_syntax / lora_text / lora_str / lyco_* /
+    # wlr_*）。**不扫 `text`**：LoraManager 的 text 槽位是「用过的全部标签」快照，
+    # 关掉的槽位也在里面，扫它会把未启用的 LoRA 报成生效项。
+    for k, v in i2.items():
+        if not isinstance(k, str) or not _LORA_SYNTAX_KEYS_RE.search(k):
+            continue
+        txt = v if isinstance(v, str) else None
+        if txt is None and isinstance(v, list) and resolve_str is not None:
+            txt = resolve_str(v, k)               # 连线：PrimitiveStringMultiline.value
+        if not isinstance(txt, str) or "<" not in txt:
+            continue
+        _rest, tags = _split_lora_tags(txt)
+        for t in tags:
+            e = _lora_tag_entry(t)
+            if e:
+                _lora_add(out, e)
     return out
 
 
@@ -4301,7 +4342,9 @@ def parse_comfy_prompt(obj: dict) -> dict:
             if "lora" in ct and "trigger" not in ct:
                 # 四条来源分支已抽到模块级 `_lora_entries_from_loader`（跨段补齐要复用），
                 # 这里只负责接到 `loras` 上；强度是连线引用时用 resolve_num 解出数值。
-                for _t in _lora_entries_from_loader(n, resolve_num):
+                # 2026-11-25：多传 resolve_str —— LoRA 语法串槽位（`lora_syntax`）常是
+                # 连线到 PrimitiveStringMultiline，不给这个就只能读字面量。
+                for _t in _lora_entries_from_loader(n, resolve_num, resolve_str):
                     loras.append(_t)
             elif "checkpointloader" in ct and isinstance(i2.get("ckpt_name"), str):
                 ckpt.append(i2["ckpt_name"])
@@ -4509,7 +4552,7 @@ def parse_comfy_prompt(obj: dict) -> dict:
                 _ct2 = _ct_key(n2)
                 if "lora" not in _ct2 or "trigger" in _ct2:
                     return
-                for _t2 in _lora_entries_from_loader(n2, resolve_num):
+                for _t2 in _lora_entries_from_loader(n2, resolve_num, resolve_str):
                     _lora_add(_extra, _t2)
 
             _walk_nodes(_mr2, obj, _visit_extra, ref_filter=_model_ref_filter)
@@ -7077,7 +7120,7 @@ def thumb_for(p: Path, size: int = 320):
 
 IDX_FILE = DATA_DIR / "prompt_index.json"
 IDX_IMG_EXTS = (".png", ".jpg", ".jpeg", ".webp")   # 参与提示词索引的格式
-PARSER_VER = 24         # 解析逻辑变更时 +1，使旧缓存整体失效重建
+PARSER_VER = 25         # 解析逻辑变更时 +1，使旧缓存整体失效重建
                         # 24（2026-11-24）：LoRA 改为「每段采样器各走一遍 model 链」，
                         #   并对 on_true/on_false 型开关（ComfySwitchNode）按静态选择剪枝。
                         #   两段式工作流（先 MOSS 起稿、再 Krea 收尾）第二段挂在另一条链上，

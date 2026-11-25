@@ -4,6 +4,60 @@
 
 ---
 
+> ## 🔧 未发版 · 修复 · LoraManager「LoRA Text Loader」的 9 条 LoRA 一条都没读到（2026-11-25）
+
+> **现象**：主人拿来一张 1248×1664 的图（`a958e402….png`），详情面板的 LoRA 区块只有 **1 条**
+> `lodestones-8-steps-dmd2-lora.safetensors (0.7)`；工作流里实际是 **10 条**，另外 9 条
+> （`moss_anima_pure_text_slider_rank16 (0.8)`、`sky02mossv1 (0.5)` … `moss-masterpieces-moss-timestep (0.4)`）
+> 全部静默丢失 —— 界面不报错，看着就像「LoRA 读错了」。
+
+> **原因**：这 9 条不在任何 LoRA 加载器的**槽位表**里，而是一串文本：
+> `KSampler#1311.model → …#1529 → LoraLoaderModelOnly#1527 → LoRA Text Loader (LoraManager)#1530
+> → ModelSamplingAuraFlow#1328 → UNETLoader#13`；
+> `#1530` 只有一个输入 `lora_syntax`，它**连到** `PrimitiveStringMultiline#1531`，
+> 后者的 `value` 是 9 个 `<lora:名字:强度>` 标签。
+> 旧实现认四类来源（`loras` 数组 / rgthree `lora_N` / `lora_name` / JSON 槽位表），
+> 没有一类覆盖「语法串 + 连线」这种形态，于是整批丢掉。
+
+> **修法**：`_lora_entries_from_loader` 增第五条来源 —— 扫键名含 `lora`/`lyco`/`wlr` 的输入，
+> 是连线就用 `resolve_str`（`parse_comfy_prompt` 里沿连线取字符串的那个函数）解到上游字符串，
+> 再交给既有的 `_split_lora_tags` + `_lora_tag_entry` 解析（与提示词内联标签同一套口径，
+> 强度字段、`<lora:名字>` 无强度、`<lyco:…>` 全都走同一份逻辑）。
+> 两处调用点（主链 `visit_m`、跨段补齐 `_visit_extra`）都补传 `resolve_str`。
+
+> **⚠️ 刻意不扫 `text`**：LoraManager 的 `text` 槽位是「用过的全部标签」快照，关掉的槽位标签
+> 也留在里面。把它当来源就会重演 2026-11-11 那类幻觉（`CLIPTextEncode` 里残留的标签被报成 LoRA）。
+> 本批门禁专门有一条负向断言盯着这件事。
+
+> **结果 · 用户样图**：`loras` 1 → **10 条**（顺序 = 主链先撞到的 `LoraLoaderModelOnly` 在前，
+> 再按标签出现顺序）；`model` 不变，仍是 `moss_image_sft_int8_convrot.safetensors`。
+> 名字自带括号那条 `VINE-MOSS-V1 (1):0.35` 解析成 `VINE-MOSS-V1 (1) (0.35)`，
+> 前端回拆正则（非贪婪 + 锚定结尾）还原为 名字 `VINE-MOSS-V1 (1)` / 强度 `0.35`，不会被吃错。
+
+> **全库回归**：12113 张 PNG 逐图比对（r24 基线 = 关掉第五条来源的同一份源码），**差异 0** ——
+> 库里只有 8 张图的 UI 工作流带 `lora_syntax`，它们执行时那个节点被绕过、LoRA 走 `loras` 槽位表，
+> 所以这批只补了缺失形态，没有改动任何存量图的口径。
+
+> **PARSER_VER 24 → 25**：索引里 `loras` 是旧口径，不升版则搜索与筛选仍按旧值。
+
+> **门禁** `tests/prompt_loratext_20261125_check.py`：**18 PASS / 0 FAIL / 1 SKIP**
+> （SKIP = 库内没有真正走第五条的图，真实样本只有桌面那张，属如实跳过）。
+> 负控（`dev/_negctl_loratext_20261125.py`）四个注入点各自翻红并复绿：
+> N1 关掉第五条来源 ⇒ A1/A4/A5/A8/B1 等 8 条红；N2 调用点不传 `resolve_str` ⇒
+> A1/A2/A3/B1/B3 红而 A4（字面量形态）仍绿（证明连线/字面量两条路真的分开走）；
+> N3 把 `text` 也纳入扫描 ⇒ A6 红（已关槽位被报出来）；N4 不解析强度 ⇒ A2/A3/B3 红。
+> 还原后源码与注入前逐字节相同。
+
+> **顺带修了门禁自身的一个坑**：`tests/prompt_lora_multistage_20261124_check.py` 的
+> `from PIL import Image` 原本写在 B 段 else 里，样本图（11/24 那张）不在桌面时 C 段直接
+> NameError 被 `except` 吞成「异常 106 张」，报成「剪枝把 model 链路剪断」的假红。已挪到模块级。
+
+> 既有解析门禁复跑无回归：lora-tag ALL CLEAN、purity ALL PASS、slottxt 17/0、
+> textn 11/0、switch 15/0、wildcard 26/0、runtime 49/0、stringfield 31/0、visual-lora 32/0、
+> count 22/0、zmltext 21/0、multistage 10/0（B 段样本图已不在桌面 ⇒ 5 SKIP）。
+
+---
+
 > ## 🔧 未发版 · 修复 · 多段工作流的 LoRA 只读到第一段（2026-11-24）
 
 > **现象**：主人拿来一张 2016×2016 的双模型图（MOSS 起稿 → Krea 收尾），详情面板只列出 **2 条 LoRA**，
