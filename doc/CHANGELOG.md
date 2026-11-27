@@ -4,6 +4,56 @@
 
 ---
 
+> ## 🔧 未发版 · 修复 · WebP/JPEG 里由写盘节点写的 ComfyUI 参数读不出来（2026-11-27）
+
+> **现象**：主人问桌面的 `Media_005.webp`「是否带元数据」。文件里带得很足 —— EXIF 块
+> **20,906 B**（占整个文件 12.8%），整份 API prompt（5,309 B）+ UI workflow（15,557 B）都在；
+> 但 CMV 里只显示尺寸 `1088 x 1920`，正向提示词、LoRA、模型**全空**，且不报错。
+
+> **原因一（读不到，主因）**：写盘节点（实测 `JosiaMediaSave`，`图像格式: ⭐ WebP`）把两份 JSON
+> 塞进 TIFF 的 **ASCII 标签 `Make`(0x010f) / `Model`(0x0110)**，值形如 `prompt:{"4": …}`。
+> 它既不是 A1111 的 `UserComment`(0x9286)，也不是 PNG 的 `tEXt` ——
+> `parse_jpeg_meta` 那条路只认 `UserComment`，`png_meta` 那条路根本不进，
+> 两条路都不认 ⇒ 数据在文件里、界面上是空的，与「本来就没有参数」无法区分。
+
+> **原因二（多，同图暴露）**：`JosiaLoraStack` 把空槽位写成**字符串 `"None"`**（不是 JSON null），
+> `lora_count` 写 6、槽位表却写到 10 ⇒ 界面多出 4 条 `None (0.8)`。
+> 旧实现只判 `isinstance(v, str)`，字符串 `"None"` 畅通无阻。
+
+> **原因三（漏，同图暴露）**：`JosiaCheckpointPlus` 的主模型字段叫 `main_model`，类名归一化后是
+> `josiacheckpointplus`（既不含 `checkpointloader` 也不含 `unetloader`）⇒ 沿 model 链一个 loader
+> 都认不出，模型整行空着。
+
+> **修法**：
+> ① `parse_jpeg_meta` 增一条来源 `_comfy_exif_kv`：扫 EXIF 的**字符串值**（含 `ExifIFD` / `GPS` 子 IFD），
+>    按**值前缀** `prompt:` / `workflow:` 认（不绑死标签号，写盘节点换标签也能读），
+>    JSON 解析失败或顶层不是对象一律不收；剥掉前缀后按 `png_meta` 的键名返回
+>    ⇒ 下游 `parse_meta` 一行都不用改（`source` 仍标 `ComfyUI`）。
+> ② `_lora_entries_from_loader` 增加 `_lora_name_real()` 过滤 `None`/`null`/`undefined`/空串占位；
+>    并新增 `_lora_slot_on()`：`lora_name_N` 若有配套的 `lora_switch_N` / `switch_N` / `enabled_N`
+>    且为关，则跳过 —— 否则关掉的槽位仍会被报成生效（与 2026-11-11 那类幻觉同源）。
+>    原生 `LoraLoader` 没有开关字段 ⇒ 仍视为启用，不误杀。
+> ③ `visit_m` 与 `_sampler_model` 认 `main_model`（限类名含 `checkpoint`/`unet`、且值非空）——
+>    防止把任意节点上叫 `main_model` 的字段当成模型。
+> ④ `PARSER_VER` 25 → 26（否则旧索引不重建，界面还是空的）。
+
+> **验证**：
+> · 这张 webp：LoRA `10 条（含 4 条 None）` → **6 条**；`model` 空 → `Ray_Moss_Artshoot_v1_int8convrot.safetensors`；
+>   正向 **844 字**、steps 8 / cfg 1.0 / seed 1102387010184043 / euler + simple 全部读到。
+> · 新门禁 `tests/webp_exif_20261127_check.py`：**21 PASS / 0 FAIL / 0 SKIP**
+>   （A 段合成工作流 6 条、B 段桌面真图 6 条、C 段跨格式与反例 8 条、D 段抹除口径 1 条）。
+> · 负控 `dev/_negctl_webpexif_20261127.py`：4 个注入点各自翻红并复绿，源码逐字节还原，
+>   **ALL CLEAN**。N1 顺带证明「KV 与 UserComment 并存」那条有分辨力
+>   （注入后回落到 `source=A1111/Forge steps=99`，正是旧行为）。
+> · 全库回归 `dev/_regress_parser_r26.py`：12,177 张 PNG 逐图对比 r25 基线，
+>   **差异 0 / 异常 0**（库内没有 webp，也没有这两个 Josia 节点的图）。
+> · 既有解析门禁复跑无回归：loratext 18/0（1 SKIP）、multistage 10/0（5 SKIP）、zmltext 21/0、
+>   lora-tag ALL CLEAN、purity ALL PASS、slottxt 17/0（1 SKIP）、switch 15/0。
+> · UI 端到端 `dev/_e2e_webpexif_20261127.py`：**本次 SKIP**（主人当时开着 test4，
+>   `require_idle()` 硬闸拦下）—— 关掉所有 CMV 窗口后可单跑复验。
+
+---
+
 > ## 🔧 未发版 · 修复 · LoraManager「LoRA Text Loader」的 9 条 LoRA 一条都没读到（2026-11-25）
 
 > **现象**：主人拿来一张 1248×1664 的图（`a958e402….png`），详情面板的 LoRA 区块只有 **1 条**

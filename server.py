@@ -3080,6 +3080,36 @@ def _lora_add(names: list, v: str) -> bool:
 #      关掉的槽位标签也在里面，扫它会报出没生效的 LoRA（2026-11-11 幻觉条目那类）。
 _LORA_SYNTAX_KEYS_RE = re.compile(r"lora|lyco|wlr", re.I)
 
+# 写盘/堆叠节点把空槽位写成这些占位串。2026-11-27 实测 JosiaLoraStack：`lora_count`
+# 声明 6 个，但槽位表照样写到 10，7..10 的 `lora_name_N` 是**字符串 "None"**
+# （不是 JSON null，所以 isinstance(v, str) 拦不住）⇒ 界面多出 4 条 "None (0.8)"。
+_LORA_NAME_PLACEHOLDERS = {"none", "null", "nil", "undefined", "nan", "-"}
+
+
+def _lora_name_real(v: str) -> bool:
+    """槽位里是不是一个真的 LoRA 文件名（挡掉空串与 "None"/"undefined" 这类占位）。"""
+    s = (v or "").strip()
+    if not s:
+        return False
+    return s.lower() not in _LORA_NAME_PLACEHOLDERS
+
+
+def _lora_slot_on(inputs: dict, suffix: str) -> bool:
+    """`lora_name_N` 这种槽位有没有配套开关、且是开着的。
+
+    原生 LoraLoader 没有开关（键不存在 ⇒ 视为启用）；堆叠类节点会另写
+    `lora_switch_N` / `switch_N` / `enabled_N`（bool 或 "true"/"false" 字符串）。
+    旧实现完全不看它 ⇒ **关掉的槽位仍被报成生效**，与 2026-11-11 那次
+    「读出根本没有的 LoRA」是同一类错。只有明确的布尔才改变判定，认不出就按启用。
+    """
+    for key in ("lora_switch", "switch", "enabled", "lora_enabled"):
+        v = inputs.get(key + suffix)
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, str) and v.strip().lower() in ("true", "false"):
+            return v.strip().lower() == "true"
+    return True
+
 
 def _lora_entries_from_loader(n, num_resolve=None, resolve_str=None):
     """从一个 LoRA 加载/堆叠节点取出**已启用**的条目文本（形如 `名字 (0.7)`）。
@@ -3134,8 +3164,12 @@ def _lora_entries_from_loader(n, num_resolve=None, resolve_str=None):
 
     for k, v in i2.items():                       # 常规格式: lora_name / lora_name_2
         if re.fullmatch(r"lora_name(_\d+)?", k) and isinstance(v, str):
-            raw = i2.get("strength_model" if k == "lora_name" else
-                         "strength_model" + (k[len("lora_name"):]))
+            if not _lora_name_real(v):
+                continue
+            sfx = k[len("lora_name"):]
+            if not _lora_slot_on(i2, sfx):
+                continue
+            raw = i2.get("strength_model" + sfx)
             st = _strength_fmt(raw)
             if st is None and num_resolve is not None:
                 st = _strength_fmt(num_resolve(raw, ("value", "float", "strength_model")))
@@ -4350,6 +4384,12 @@ def parse_comfy_prompt(obj: dict) -> dict:
                 ckpt.append(i2["ckpt_name"])
             elif "unetloader" in ct and isinstance(i2.get("unet_name"), str):
                 ckpt.append(i2["unet_name"])
+            elif (isinstance(i2.get("main_model"), str) and i2["main_model"].strip()
+                  and ("checkpoint" in ct or "unet" in ct)):
+                # 2026-11-27：JosiaCheckpointPlus 把主模型写在 `main_model`，类名归一化后
+                # 是 `josiacheckpointplus`（不含 checkpointloader/unetloader）⇒ 旧实现沿
+                # model 链一个 loader 都认不出，界面「模型」整行空着，而文件里明明有。
+                ckpt.append(i2["main_model"].strip())
         # 主链也按开关的静态选择剪枝（`_model_ref_filter`）：不剪的话两臂会一起走，
         # ckpt[0] 取决于 DFS 撞见顺序 —— 实测 414456A5… 的 MOSS 基础/微调开关为 true
         # （该用 base），却因为 on_false 那条被先撞到而记成了 sft，连带把这一臂上的
@@ -4404,6 +4444,9 @@ def parse_comfy_prompt(obj: dict) -> dict:
                 got.append(i3["ckpt_name"].strip())
             elif "unetloader" in ct and isinstance(i3.get("unet_name"), str):
                 got.append(i3["unet_name"].strip())
+            elif (isinstance(i3.get("main_model"), str) and i3["main_model"].strip()
+                  and ("checkpoint" in ct or "unet" in ct)):
+                got.append(i3["main_model"].strip())   # JosiaCheckpointPlus，口径同 visit_m
 
         # 开关（on_true/on_false）只走静态选中的那一臂：不剪的话 DFS 会先撞到
         # on_false 分支上的 loader —— 实测 414456A5… 原版配方开关为 true 时，
@@ -4975,10 +5018,67 @@ def parse_meta(meta: dict, diag: dict = None):
     return None
 
 
+# ComfyUI 写盘节点塞进 EXIF 的两个键。2026-11-27 实测来源：JosiaMediaSave
+# （`图像格式: ⭐ WebP`）把整份 API prompt 与 UI workflow 直接写进 TIFF 的 ASCII
+# 标签 Make(0x010f) / Model(0x0110)，值形如 `prompt:{"4": …}`。
+# 之前这些图走 A1111 那条路（只认 UserComment 0x9286），于是**数据明明在文件里、
+# 界面上提示词和 LoRA 全空**，只读出尺寸。用户那张 1088×1920 的 webp 就是。
+_EXIF_KV_PREFIXES = (("prompt:", "prompt"), ("workflow:", "workflow"))
+
+
+def _comfy_exif_kv(exif) -> dict:
+    """从 EXIF 的字符串值里取 ComfyUI 的 `prompt:{…}` / `workflow:{…}`。
+
+    刻意按**值前缀**认、不绑死标签号：写盘节点换标签（Make/Model/ImageDescription…）
+    也能读到。JSON 解析失败的一律不认 —— 宁可当没有，也不往界面上塞半截坏数据
+    （parse_meta 对畸形内容没有容错，喂进去会在渲染侧炸）。
+    """
+    out = {}
+    try:
+        items = list(exif.items())
+        # IFD0 之外的子 IFD 也扫一遍（部分写盘实现放在 ExifIFD）
+        for sub in (0x8769, 0x8825):
+            try:
+                items += list(exif.get_ifd(sub).items())
+            except Exception:
+                pass
+    except Exception:
+        return out
+    for _tag, v in items:
+        if isinstance(v, (bytes, bytearray)):
+            try:
+                v = bytes(v).decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+        if not isinstance(v, str):
+            continue
+        s = v.strip()
+        # 下界挡住相机厂商标识这类短串；上界复用 PNG 的文本块上限（防解压/超大值）
+        if len(s) < 12 or len(s) > MAX_TEXT_BYTES:
+            continue
+        head = s[:9].lower()
+        for pre, key in _EXIF_KV_PREFIXES:
+            if key in out or not head.startswith(pre):
+                continue
+            raw = s[len(pre):].strip()
+            try:
+                obj = json.loads(raw)
+            except ValueError:
+                continue
+            if isinstance(obj, dict) and obj:
+                out[key] = raw
+            break
+    return out
+
+
 def parse_jpeg_meta(path: Path) -> dict:
     """从 PIL 可读的位图（JPEG/WebP/GIF/BMP）提取尺寸与生成参数。
 
-    A1111/Forge 的参数存于 EXIF UserComment(0x9286)。
+    两条来源，键名与 png_meta 对齐（`prompt` / `workflow` / `parameters`），
+    下游 parse_meta 一行都不用改：
+
+      1. A1111/Forge → EXIF UserComment(0x9286)，纯文本 `Steps: …`
+      2. ComfyUI 的写盘节点 → EXIF ASCII 标签里的 `prompt:{…}` / `workflow:{…}`
     """
     if not HAS_PIL:
         return {}
@@ -4989,6 +5089,7 @@ def parse_jpeg_meta(path: Path) -> dict:
                 exif = im.getexif()
             except Exception:
                 return meta
+            meta.update(_comfy_exif_kv(exif))
             v = exif.get(0x9286)
             if isinstance(v, bytes):
                 text = v[8:].decode("utf-8", "replace")  # 跳过 8 字节编码头
@@ -7120,7 +7221,18 @@ def thumb_for(p: Path, size: int = 320):
 
 IDX_FILE = DATA_DIR / "prompt_index.json"
 IDX_IMG_EXTS = (".png", ".jpg", ".jpeg", ".webp")   # 参与提示词索引的格式
-PARSER_VER = 25         # 解析逻辑变更时 +1，使旧缓存整体失效重建
+PARSER_VER = 26         # 解析逻辑变更时 +1，使旧缓存整体失效重建
+                        # 26（2026-11-27）：① parse_jpeg_meta 读 EXIF 里形如 `prompt:{…}` /
+                        #   `workflow:{…}` 的 ASCII 标签（JosiaMediaSave 这类写盘节点把整份
+                        #   参数塞在 Make/Model 里）—— 此前 WebP/JPEG 只有 A1111 的
+                        #   UserComment 一条路，这类图提示词/LoRA/模型全空；
+                        #   ② LoRA 槽位名是 "None"/空串占位时不再当成条目，并看配套的
+                        #   lora_switch_N（关掉的槽位不该报出来）；
+                        #   ③ 认 `main_model`（JosiaCheckpointPlus）为主模型。
+                        #   索引里 `pos` / `model` / `loras` 都是旧口径 ⇒ 不升版则搜索与
+                        #   筛选仍按旧值，面板仍是空的。
+                        # 25（2026-11-25）：LoRA 增第五条来源（键名含 lora/lyco/wlr 的语法串
+                        #   槽位，典型是 LoraManager「LoRA Text Loader」的 lora_syntax 连线）。
                         # 24（2026-11-24）：LoRA 改为「每段采样器各走一遍 model 链」，
                         #   并对 on_true/on_false 型开关（ComfySwitchNode）按静态选择剪枝。
                         #   两段式工作流（先 MOSS 起稿、再 Krea 收尾）第二段挂在另一条链上，
