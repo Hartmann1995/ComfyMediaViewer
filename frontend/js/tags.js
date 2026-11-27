@@ -1108,7 +1108,11 @@ function renderTagSuggestions(it){
   if(!it) return;
   if(_tagSugPath!==it.path){ _tagSugPath=it.path; _tagSugOpen=false; }
   const tags=(it.tags||[]).map(x=>x.toLowerCase());
-  const cand=suggestTagsFromMeta(it).filter(t=>!tags.includes(t.toLowerCase()));
+  /* 已经有同名标签就不再推 —— 并且**按叶子名**算：库里存着旧的「风格/汉服」时，
+     不该再推一条「穿搭/汉服」让人贴出两个近义标签（2026-11-27 大类改名的善后）。 */
+  const leaf=t=>String(t||"").toLowerCase().split("/").pop();
+  const have=new Set(tags), haveLeaf=new Set(tags.map(leaf));
+  const cand=suggestTagsFromMeta(it).filter(t=>!have.has(t.toLowerCase()) && !haveLeaf.has(leaf(t)));
   if(!cand.length) return;
   const show=_tagSugOpen ? cand : cand.slice(0,TAG_SUG_SHOW);
   const row=document.createElement("div"); row.id="tagSugRow";
