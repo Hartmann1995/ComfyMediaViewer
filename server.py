@@ -70,7 +70,7 @@ PLAYABLE_VIDEO = {".mp4", ".webm", ".m4v", ".mov"}
 CHUNK = 1 << 16
 
 APP_TITLE = "ComfyUI Media Viewer"
-APP_VERSION = "2.13.5"          # 版本号唯一来源（/api/info 与 Server 头都取它）
+APP_VERSION = "2.13.6"          # 版本号唯一来源（/api/info 与 Server 头都取它）
 # 关于页「项目」链接：**只认枚举 key，接口不接收任意 URL** —— 否则这个端点就成了
 # 「本机任意网址打开器」，能被拿来钓鱼或触发本机协议。新增入口只改这一处，
 # 前端从 /api/sysinfo 的 links 字段取用（不在前端硬编码，避免两处漂移）。
