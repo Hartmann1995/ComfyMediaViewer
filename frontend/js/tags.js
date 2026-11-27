@@ -853,90 +853,279 @@ function openBatchTag(){
   };
 }
 
-/* --- AI 建议词表:从 PNG 内嵌正向提示词提风格/服装/发色/场景 --- */
+/* --- AI 建议词表：从正向提示词里提「人物 / 穿搭 / 场景 / 风格 / 构图」标签 ---
+   ⚠️ 2026-11-27 A1+A2（主人要求「预设标签太少，能拓展吗」）：
+     旧表 51 条，全库 12,141 张实测下来 —— 「蕾丝」3,058 次命中里有 1,386 次其实是
+     necklace / bracelet（45%）；「Cosplay」380 次里 267 次是 cosmic / costume（70%）；
+     「城市夜景」557 次里 342 次是白天的 street（61%）—— 全是裸子串匹配惹的祸。
+     本次两件事：
+       ① **收紧**：拉丁词一律带词边界（`\b`）；`cos` 只认 cosplay；夜景必须同时出现
+          night / neon；`shota`（男性）从「少女」挪到「男性」；snow white 不算雪景；
+          项链/手链单独给了标签，不再冒充蕾丝。
+       ② **扩容**：51 → 180 条，补性别/发长/瞳色/兽耳、景别构图、画风流派、天气与室内场景。
+     每条可带 `w`（权重，默认 10）：具体标签 14~20、中等 10~13、泛化 4~8。
+     排序 = 权重 → 命中位置（提示词越靠前越可能是主体）→ 词表顺序（稳定可复现）。
+     ⚠️ 加词只往本数组追加即可；`tag` 里不要写空格（层级按 `/` 切，带空格会让分组错位）。 */
 const SUGGEST_LEXICON=[
-  // 服装/风格大类
-  {re:/汉服|hanfu|hanfu|中国风|古风|华服/i, tag:"风格/汉服"},
-  {re:/旗袍|qipao/i, tag:"风格/旗袍"},
-  {re:/和服|kimono/i, tag:"风格/和服"},
-  {re:/cosplay|cos/i, tag:"风格/Cosplay"},
-  {re:/赛博|cyberpunk|cyber/i, tag:"风格/赛博"},
-  {re:/蒸汽朋克|steampunk/i, tag:"风格/蒸汽朋克"},
-  {re:/洛丽塔|lolita/i, tag:"风格/洛丽塔"},
-  {re:/哥特|gothic/i, tag:"风格/哥特"},
-  {re:/未来|futuris/i, tag:"风格/未来"},
-  {re:/废墟|ruins|wasteland/i, tag:"场景/废墟"},
-  {re:/教室|classroom|school/i, tag:"场景/校园"},
-  {re:/泳池|pool|beach|swim/i, tag:"场景/泳池海边"},
-  {re:/浴室|bathroom|shower|bath/i, tag:"场景/浴室"},
-  {re:/厨房|kitchen/i, tag:"场景/厨房"},
-  {re:/街道|street|alley|neon.?city|night city/i, tag:"场景/城市夜景"},
-  {re:/卧室|bedroom/i, tag:"场景/卧室"},
-  {re:/森林|forest|woods/i, tag:"场景/森林"},
-  {re:/雪|snow/i, tag:"场景/雪景"},
-  {re:/花田|flower|garden/i, tag:"场景/花园"},
-  // 人物属性
-  {re:/黑发|black hair|dark hair/i, tag:"人物/黑发"},
-  {re:/白发|silver hair|white hair|grey hair/i, tag:"人物/白发"},
-  {re:/金发|blonde|golden hair/i, tag:"人物/金发"},
-  {re:/粉发|pink hair|sakura hair/i, tag:"人物/粉发"},
-  {re:/蓝发|blue hair/i, tag:"人物/蓝发"},
-  {re:/紫发|purple hair|violet hair/i, tag:"人物/紫发"},
-  {re:/红瞳|red eye|赤瞳/i, tag:"人物/红瞳"},
-  {re:/蓝瞳|blue eye|碧眼/i, tag:"人物/蓝瞳"},
-  {re:/少女|1girl|shota|teen/i, tag:"人物/少女"},
-  {re:/御姐|mature|office lady/i, tag:"人物/御姐"},
-  {re:/猫耳|cat ear|nekomimi/i, tag:"人物/猫耳"},
-  {re:/兔耳|bunny|usagi/i, tag:"人物/兔耳"},
-  {re:/眼镜|glasses|meganekko/i, tag:"人物/眼镜"},
-  {re:/双马尾|twin tail|twintails/i, tag:"人物/双马尾"},
-  {re:/高马尾|ponytail/i, tag:"人物/高马尾"},
-  {re:/麻花辫|braid/i, tag:"人物/辫子"},
-  {re:/黑丝|black stocking|pantyhose|stocking/i, tag:"穿搭/黑丝"},
-  {re:/白丝|white stocking/i, tag:"穿搭/白丝"},
-  {re:/蕾丝|lace/i, tag:"穿搭/蕾丝"},
-  {re:/长裙|dress|gown|skirt/i, tag:"穿搭/裙装"},
-  {re:/西装|suit|business/i, tag:"穿搭/西装"},
-  {re:/泳衣|swimsuit|bikini/i, tag:"穿搭/泳装"},
-  {re:/女仆|maid/i, tag:"穿搭/女仆装"},
-  {re:/制服|uniform|seifuku/i, tag:"穿搭/制服"},
-  {re:/运动|sport|yoga|gym/i, tag:"穿搭/运动装"},
-  // 视角/构图(横竖由 IHDR 判断,这里只词表)
-  {re:/from above|俯视/i, tag:"视角/俯视"},
-  {re:/from below|仰视/i, tag:"视角/仰视"},
-  {re:/back view|背影/i, tag:"视角/背面"},
-  {re:/side view|侧面/i, tag:"视角/侧面"},
-  {re:/close[- ]up|特写/i, tag:"视角/特写"},
-  {re:/full body|全身/i, tag:"视角/全身"},
-  {re:/portrait|半身/i, tag:"视角/半身"},
-  // 质量/用途(不自动贴,留给用户)
+  // ---------- 人物 · 性别 / 年龄感（w 低 = 泛化，不该挤掉具体标签） ----------
+  {re:/(?:^|[^a-z])1boy|male focus|solo male|\bmale\b|\bman\b|男性|男生/i, tag:"人物/男性", w:7},
+  {re:/(?:^|[^a-z])1girl|female focus|\bwoman\b|\bfemale\b|少女|女孩|女生/i, tag:"人物/少女", w:6},
+  {re:/loli|萝莉|幼女/i, tag:"人物/萝莉", w:9},
+  {re:/mature female|office lady|御姐|熟女/i, tag:"人物/御姐", w:12},
+  {re:/old man|elderly|大叔|老人/i, tag:"人物/长者", w:12},
+  {re:/muscular|\babs\b|肌肉/i, tag:"人物/肌肉", w:12},
+  {re:/chubby|plump|curvy|丰满/i, tag:"人物/丰满", w:12},
+  // ---------- 人物 · 发色 ----------
+  {re:/black hair|dark hair|黑发/i, tag:"人物/黑发", w:13},
+  {re:/white hair|silver hair|白发|银发/i, tag:"人物/白发", w:13},
+  {re:/blonde|golden hair|金发/i, tag:"人物/金发", w:13},
+  {re:/brown hair|棕发|栗发/i, tag:"人物/棕发", w:13},
+  {re:/pink hair|sakura hair|粉发/i, tag:"人物/粉发", w:13},
+  {re:/blue hair|蓝发/i, tag:"人物/蓝发", w:13},
+  {re:/purple hair|violet hair|紫发/i, tag:"人物/紫发", w:13},
+  {re:/red hair|ginger hair|scarlet hair|红发/i, tag:"人物/红发", w:13},
+  {re:/green hair|绿发/i, tag:"人物/绿发", w:13},
+  {re:/gr[ae]y hair|灰发|银灰发/i, tag:"人物/灰发", w:13},
+  {re:/multicolou?red hair|two-?tone hair|gradient hair|挑染/i, tag:"人物/挑染", w:14},
+  // ---------- 人物 · 发长 / 发型 ----------
+  {re:/long hair|长发/i, tag:"人物/长发", w:12},
+  {re:/short hair|短发/i, tag:"人物/短发", w:11},
+  {re:/medium hair|中长发/i, tag:"人物/中长发", w:12},
+  {re:/twin ?tails|twintails|双马尾/i, tag:"人物/双马尾", w:12},
+  {re:/ponytail|马尾/i, tag:"人物/马尾", w:12},
+  {re:/braid|辫子/i, tag:"人物/辫子", w:12},
+  {re:/bob cut|波波头/i, tag:"人物/波波头", w:13},
+  {re:/\bbangs\b|刘海/i, tag:"人物/刘海", w:8},
+  {re:/hime cut|姬发式/i, tag:"人物/姬发式", w:14},
+  {re:/ahoge|呆毛/i, tag:"人物/呆毛", w:13},
+  {re:/\bbun\b|hair bun|丸子头/i, tag:"人物/丸子头", w:13},
+  // ---------- 人物 · 瞳色 ----------
+  {re:/red eyes?|赤瞳|红瞳/i, tag:"人物/红瞳", w:12},
+  {re:/blue eyes?|碧眼|蓝瞳/i, tag:"人物/蓝瞳", w:12},
+  {re:/green eyes?|绿瞳/i, tag:"人物/绿瞳", w:12},
+  {re:/yellow eyes?|golden eyes?|amber eyes?|金瞳/i, tag:"人物/金瞳", w:12},
+  {re:/purple eyes?|violet eyes?|紫瞳/i, tag:"人物/紫瞳", w:12},
+  {re:/heterochromia|异色瞳/i, tag:"人物/异色瞳", w:15},
+  // ---------- 人物 · 表情 ----------
+  {re:/\bsmile\b|微笑|笑容/i, tag:"人物/笑容", w:7},
+  {re:/\bblush\b|脸红|害羞/i, tag:"人物/脸红", w:8},
+  {re:/crying|tears|流泪|眼泪/i, tag:"人物/眼泪", w:9},
+  {re:/closed eyes|闭眼/i, tag:"人物/闭眼", w:8},
+  {re:/looking at viewer|看向镜头/i, tag:"人物/看向镜头", w:8},
+  {re:/open mouth|张嘴/i, tag:"人物/张嘴", w:7},
+  // ---------- 人物 · 身体特征 ----------
+  {re:/cat ears|nekomimi|猫耳/i, tag:"人物/猫耳", w:14, g:"ears"},
+  {re:/fox ears|狐耳/i, tag:"人物/狐耳", w:14, g:"ears"},
+  {re:/wolf ears|狼耳/i, tag:"人物/狼耳", w:14, g:"ears"},
+  {re:/bunny ears|rabbit ears|usagi|兔耳/i, tag:"人物/兔耳", w:14, g:"ears"},
+  {re:/animal ears|兽耳/i, tag:"人物/兽耳", w:12, g:"ears"},
+  {re:/\bhorns?\b|犄角/i, tag:"人物/角", w:13},
+  {re:/\bwings?\b|翅膀/i, tag:"人物/翅膀", w:13},
+  {re:/\btail\b|尾巴/i, tag:"人物/尾巴", w:11},
+  {re:/elf ears|pointy ears|精灵耳/i, tag:"人物/精灵耳", w:15},
+  {re:/freckles|雀斑/i, tag:"人物/雀斑", w:13},
+  {re:/tattoo|纹身/i, tag:"人物/纹身", w:13},
+  {re:/glasses|meganekko|眼镜/i, tag:"人物/眼镜", w:11},
+  // ---------- 穿搭 · 服装 ----------
+  {re:/hanfu|chinese clothes|汉服|古风|中国风|华服/i, tag:"穿搭/汉服", w:16},
+  {re:/qipao|cheongsam|旗袍/i, tag:"穿搭/旗袍", w:16},
+  {re:/kimono|yukata|和服|浴衣/i, tag:"穿搭/和服", w:15},
+  {re:/cosplay|コスプレ/i, tag:"穿搭/Cosplay", w:15},
+  {re:/lolita|洛丽塔/i, tag:"穿搭/洛丽塔", w:15},
+  {re:/\bmaid\b|女仆/i, tag:"穿搭/女仆装", w:13},
+  {re:/school uniform|校服/i, tag:"穿搭/校服", w:13, g:"uniform"},
+  {re:/\buniform\b|seifuku|制服/i, tag:"穿搭/制服", w:9, g:"uniform"},
+  {re:/\bsuit\b|business suit|西装|西服/i, tag:"穿搭/西装", w:11},
+  {re:/wedding dress|婚纱/i, tag:"穿搭/婚纱", w:16},
+  {re:/evening gown|long dress|长裙/i, tag:"穿搭/长裙", w:12, g:"skirt"},
+  {re:/mini ?skirt|短裙/i, tag:"穿搭/短裙", w:12, g:"skirt"},
+  {re:/\bdress\b|\bgown\b|\bskirt\b|连衣裙|裙装/i, tag:"穿搭/裙装", w:7, g:"skirt"},
+  {re:/\blace\b|蕾丝/i, tag:"穿搭/蕾丝", w:11},
+  {re:/pantyhose|thigh ?highs?|black stocking|黑丝|丝袜/i, tag:"穿搭/黑丝", w:11},
+  {re:/white stocking|白丝/i, tag:"穿搭/白丝", w:12},
+  {re:/swimsuit|bikini|泳衣|泳装/i, tag:"穿搭/泳装", w:12, g:"swim"},
+  {re:/school swimsuit|死库水/i, tag:"穿搭/死库水", w:15, g:"swim"},
+  {re:/sportswear|yoga|gym|jersey|运动服/i, tag:"穿搭/运动装", w:10},
+  {re:/hoodie|卫衣/i, tag:"穿搭/卫衣", w:10},
+  {re:/sweater|knitwear|毛衣/i, tag:"穿搭/毛衣", w:10},
+  {re:/\bshirt\b|衬衫/i, tag:"穿搭/衬衫", w:9},
+  {re:/\bjacket\b|blazer|外套/i, tag:"穿搭/外套", w:9},
+  {re:/\bcoat\b|大衣/i, tag:"穿搭/大衣", w:9},
+  {re:/jeans|denim|牛仔/i, tag:"穿搭/牛仔", w:9},
+  {re:/\bshorts\b|短裤/i, tag:"穿搭/短裤", w:9},
+  {re:/lingerie|underwear|内衣/i, tag:"穿搭/内衣", w:10},
+  {re:/\bbra\b|胸罩/i, tag:"穿搭/内衣", w:10},
+  {re:/panties|内裤/i, tag:"穿搭/内裤", w:10},
+  {re:/pajamas|睡衣/i, tag:"穿搭/睡衣", w:10},
+  {re:/\bapron\b|围裙/i, tag:"穿搭/围裙", w:10},
+  {re:/\bnurse\b|护士/i, tag:"穿搭/护士装", w:13},
+  {re:/\bveil\b|头纱/i, tag:"穿搭/头纱", w:12},
+  {re:/\bcrown\b|tiara|头冠|王冠/i, tag:"穿搭/头冠", w:12},
+  {re:/\bhat\b|\bcap\b|帽子/i, tag:"穿搭/帽子", w:8},
+  {re:/\bribbon\b|headband|发带|发饰/i, tag:"穿搭/发饰", w:9},
+  {re:/choker|项圈/i, tag:"穿搭/项圈", w:11},
+  {re:/necklace|项链/i, tag:"穿搭/项链", w:11},
+  {re:/earrings?|耳环|耳饰/i, tag:"穿搭/耳饰", w:11},
+  {re:/\bgloves?\b|手套/i, tag:"穿搭/手套", w:9},
+  {re:/\bscarf\b|围巾/i, tag:"穿搭/围巾", w:10},
+  {re:/necktie|\btie\b|领带/i, tag:"穿搭/领带", w:10},
+  {re:/\bboots?\b|靴子/i, tag:"穿搭/靴子", w:9},
+  {re:/high heels|\bheels\b|高跟鞋/i, tag:"穿搭/高跟鞋", w:11},
+  {re:/barefoot|赤足/i, tag:"穿搭/赤足", w:9},
+  {re:/wet clothes|wet shirt|湿衣/i, tag:"穿搭/湿衣", w:11},
+  // ---------- 场景 · 室内 ----------
+  {re:/classroom|教室/i, tag:"场景/教室", w:13},
+  {re:/\bschool\b(?! ?uniform)|校园/i, tag:"场景/校园", w:6},
+  {re:/bedroom|卧室/i, tag:"场景/卧室", w:13},
+  {re:/\bbed\b|床上/i, tag:"场景/床", w:8},
+  {re:/bathroom|shower|浴室|淋浴/i, tag:"场景/浴室", w:13},
+  {re:/bathtub|浴缸/i, tag:"场景/浴缸", w:14},
+  {re:/kitchen|厨房/i, tag:"场景/厨房", w:14},
+  {re:/library|bookshelf|图书馆|书架/i, tag:"场景/图书馆", w:14},
+  {re:/cafe|coffee shop|咖啡馆/i, tag:"场景/咖啡馆", w:15},
+  {re:/\boffice\b|workspace|办公室/i, tag:"场景/办公室", w:12},
+  {re:/shrine|temple|神社|寺庙/i, tag:"场景/神社寺庙", w:15},
+  {re:/castle|城堡/i, tag:"场景/城堡", w:15},
+  {re:/rooftop|天台|屋顶/i, tag:"场景/天台", w:13},
+  {re:/\btrain\b|subway|车厢|地铁/i, tag:"场景/车厢", w:12},
+  {re:/car interior|车内/i, tag:"场景/车内", w:15},
+  {re:/\bwindow\b|窗边/i, tag:"场景/窗边", w:9},
+  {re:/\bindoor\b|室内/i, tag:"场景/室内", w:5},
+  // ---------- 场景 · 室外 / 天气 / 时间 ----------
+  {re:/night city|neon city|city at night|night street|street at night|夜景|霓虹街/i, tag:"场景/城市夜景", w:14, g:"night"},
+  {re:/\bstreet\b|alley|街道|小巷/i, tag:"场景/街道", w:8},
+  {re:/\boutdoor\b|室外|户外/i, tag:"场景/室外", w:5},
+  {re:/forest|woods|森林/i, tag:"场景/森林", w:13},
+  {re:/garden|flower field|花田|花园/i, tag:"场景/花园", w:11},
+  {re:/beach|海边|沙滩/i, tag:"场景/海边", w:12, g:"sea"},
+  {re:/\bpool\b|泳池/i, tag:"场景/泳池", w:12},
+  {re:/\bsnow(?![- ]?\s*white)|雪景|下雪|雪地/i, tag:"场景/雪景", w:12},
+  {re:/\brain\b|rainy|雨天|下雨/i, tag:"场景/雨天", w:12},
+  {re:/sunset|dusk|twilight|golden hour|日落|黄昏/i, tag:"场景/日落", w:13},
+  {re:/\bnight\b|夜晚|夜里/i, tag:"场景/夜晚", w:6, g:"night"},
+  {re:/autumn|maple|秋景|红叶/i, tag:"场景/秋景", w:13},
+  {re:/winter|冬景|冬天/i, tag:"场景/冬景", w:12},
+  {re:/cherry blossoms?|sakura|樱花/i, tag:"场景/樱花", w:13},
+  {re:/underwater|aquarium|水下/i, tag:"场景/水下", w:15},
+  {re:/ruins|wasteland|废墟/i, tag:"场景/废墟", w:15},
+  {re:/desert|沙漠/i, tag:"场景/沙漠", w:14},
+  {re:/\bspace\b|cosmos|nebula|星空|宇宙|太空/i, tag:"场景/星空", w:13},
+  {re:/festival|fireworks|祭典|烟花/i, tag:"场景/祭典", w:13},
+  {re:/\bmarket\b|市集|集市/i, tag:"场景/市集", w:12},
+  {re:/\bbridge\b|大桥|桥/i, tag:"场景/桥", w:13},
+  {re:/hallway|corridor|走廊|过道/i, tag:"场景/走廊", w:13},
+  {re:/\bsky\b|\bclouds?\b|天空|云/i, tag:"场景/天空", w:6},
+  {re:/mountain|山脉|山景/i, tag:"场景/山", w:9},
+  {re:/ocean|\bsea\b|大海|海洋/i, tag:"场景/海", w:9, g:"sea"},
+  {re:/\blake\b|river|湖泊|湖面|河/i, tag:"场景/湖河", w:9},
+  // ---------- 风格 · 画风 / 题材 ----------
+  {re:/photorealistic|photo-?realistic|\bdslr\b|raw photo|35mm|摄影写实/i, tag:"风格/摄影写实", w:16},
+  {re:/watercolou?r|水彩|水墨淡彩/i, tag:"风格/水彩", w:18},
+  {re:/oil painting|油画/i, tag:"风格/油画", w:18},
+  {re:/ink wash|sumi-?e|chinese ink|水墨/i, tag:"风格/水墨", w:18},
+  {re:/monochrome|gr[ae]yscale|黑白/i, tag:"风格/黑白", w:16},
+  {re:/pixel art|像素风|像素/i, tag:"风格/像素", w:18},
+  {re:/3d render|\bblender\b|\bcgi\b|octane|3d渲染/i, tag:"风格/3D渲染", w:16},
+  {re:/impasto|thick paint|厚涂/i, tag:"风格/厚涂", w:18},
+  {re:/sketch|line ?art|pencil|线稿|素描/i, tag:"风格/线稿", w:14},
+  {re:/\bcomic\b|\bmanga\b|漫画/i, tag:"风格/漫画", w:12},
+  {re:/poster|graphic design|平面设计/i, tag:"风格/平面设计", w:15},
+  {re:/cyberpunk|赛博/i, tag:"风格/赛博", w:15},
+  {re:/steampunk|蒸汽朋克/i, tag:"风格/蒸汽朋克", w:18},
+  {re:/gothic|哥特/i, tag:"风格/哥特", w:14},
+  {re:/fantasy|奇幻/i, tag:"风格/奇幻", w:12},
+  {re:/sci-?fi|科幻|futuris|未来感/i, tag:"风格/科幻", w:13},
+  {re:/traditional chinese|国风|国潮/i, tag:"风格/国风", w:15},
+  {re:/ukiyo-?e|浮世绘/i, tag:"风格/浮世绘", w:18},
+  {re:/film grain|35mm film|胶片/i, tag:"风格/胶片", w:15},
+  {re:/vintage|retro|复古/i, tag:"风格/复古", w:14},
+  {re:/minimalis|极简/i, tag:"风格/极简", w:16},
+  {re:/anime style|二次元|动漫/i, tag:"风格/二次元", w:5},
+  // ---------- 构图 / 视角 ----------
+  {re:/from above|overhead|bird'?s eye|俯视|鸟瞰/i, tag:"视角/俯视", w:13},
+  {re:/from below|low angle|仰视/i, tag:"视角/仰视", w:13},
+  {re:/from behind|back view|背影/i, tag:"视角/背面", w:12},
+  {re:/side view|\bprofile\b|侧脸|侧面/i, tag:"视角/侧面", w:11},
+  {re:/close-?up|特写/i, tag:"视角/特写", w:12},
+  {re:/full body|全身/i, tag:"视角/全身", w:12},
+  {re:/upper body|半身以上/i, tag:"视角/半身", w:10},
+  {re:/portrait|肖像/i, tag:"视角/肖像", w:7},
+  {re:/cowboy shot|七分身/i, tag:"视角/七分身", w:13},
+  {re:/feet focus|legs? focus|\bthighs?\b|腿脚|腿部/i, tag:"视角/腿脚", w:12},
+  {re:/wide shot|long shot|远景/i, tag:"视角/远景", w:13},
+  {re:/dutch angle|倾斜构图/i, tag:"视角/倾斜构图", w:18},
+  {re:/\bpov\b|第一人称/i, tag:"视角/第一人称", w:14},
+  {re:/looking back|回眸/i, tag:"视角/回眸", w:13},
+  {re:/depth of field|\bbokeh\b|景深|虚化/i, tag:"视角/景深", w:9},
 ];
+const SUGGEST_MAX=24;              // 排序后最多留几条（再多没人看，还拖面板）
 function suggestTagsFromMeta(it){
-  const out=[];
   const m=S.curMeta && (S.curMeta.parsed||{});
   const pos = m && m.positive ? m.positive : "";
-  if(!pos) return out;
-  for(const lx of SUGGEST_LEXICON){
-    if(lx.re.test(pos) && !out.includes(lx.tag)) out.push(lx.tag);
+  if(!pos) return [];
+  /* ⚠️ 用 exec 而不是 test：要拿命中位置参与排序（提示词开头的词更可能是主体）。
+     排序三档：权重 → 命中位置 → 词表顺序。全部确定，不随浏览器实现抖动。 */
+  const hits=new Map();            // tag -> {w, at, i, g}
+  for(let i=0;i<SUGGEST_LEXICON.length;i++){
+    const lx=SUGGEST_LEXICON[i];
+    const mm=lx.re.exec(pos);
+    if(!mm) continue;
+    const at=mm.index, w=(lx.w==null?10:lx.w), old=hits.get(lx.tag);
+    /* 同一标签可有多条规则（「短裙」既认 mini skirt 也认短裙）：
+       留权重更高、命中更靠前的那次，别让后面的弱规则盖掉强规则。 */
+    if(!old || w>old.w || (w===old.w && at<old.at))
+      hits.set(lx.tag, {w, at, i, g:lx.g||""});
   }
-  return out.slice(0,8);
+  /* 同族只留**最具体**的一条（g 相同者比权重、再比命中位置）：
+     穿 short skirt 时不再同时推「裙装」，猫耳不再附带「兽耳」，
+     死库水不再附带「泳装」，校服不再附带「制服」，城市夜景不再附带「夜晚」，海边不再附带「海」。
+     —— 这一条是「条数变多但不吵」的关键，去掉它平均每条图要多 1.3 个冗余胶囊。 */
+  /* ⚠️ best 里存**标签名**，不能存 `for...of` 拿到的 [k,v] 数组：
+     那个数组是临时对象，后面 `Array.from(hits.entries())` 又会造一批新数组，
+     用 `===` 比引用永远不成立 ⇒ 整族标签会被全部过滤掉（实测：裙装/猫耳/泳装
+     在全库一次都没出现）。比名字才是稳定的。 */
+  const best=new Map();
+  for(const e of hits){
+    const g=e[1].g; if(!g) continue;
+    const cur=best.get(g), cw=cur?hits.get(cur):null;
+    if(!cur || e[1].w>cw.w || (e[1].w===cw.w && e[1].at<cw.at)) best.set(g,e[0]);
+  }
+  return Array.from(hits.entries())
+    .filter(e=>!e[1].g || best.get(e[1].g)===e[0])
+    .sort((a,b)=> (b[1].w-a[1].w) || (a[1].at-b[1].at) || (a[1].i-b[1].i))
+    .slice(0, SUGGEST_MAX)
+    .map(e=>e[0]);
 }
 
 /* --- 大图详情面板里加"AI 建议"行(在 renderTagPanel 渲染后调用) --- */
+/* 收起时先给 10 条（旧版固定 8 条、无出口），其余折叠成「还有 N 条」。
+   展开状态按**图片路径**记忆：翻页即收起，同一张图点掉几个建议不会又缩回去。 */
+const TAG_SUG_SHOW=10;
+let _tagSugOpen=false, _tagSugPath="";
 function renderTagSuggestions(it){
   const panel=$("#tagPanel"); if(!panel) return;
   const sug=$("#tagSugRow"); if(sug) sug.remove();
+  if(!it) return;
+  if(_tagSugPath!==it.path){ _tagSugPath=it.path; _tagSugOpen=false; }
   const tags=(it.tags||[]).map(x=>x.toLowerCase());
   const cand=suggestTagsFromMeta(it).filter(t=>!tags.includes(t.toLowerCase()));
   if(!cand.length) return;
+  const show=_tagSugOpen ? cand : cand.slice(0,TAG_SUG_SHOW);
   const row=document.createElement("div"); row.id="tagSugRow";
   row.style.cssText="margin-top:7px;display:flex;flex-wrap:wrap;gap:4px;align-items:center";
   row.innerHTML='<span style="font-size:calc(10px*var(--fsx));color:var(--tx3);margin-right:2px;display:inline-flex;align-items:center;gap:calc(2px*var(--fsx))">'+ico("sparkle")+' 建议</span>';
-  for(const t of cand){
+  for(const t of show){
     const s=document.createElement("span"); s.className="tagchip sug"; s.style.cssText="border-style:dashed;font-size:calc(10.5px*var(--fsx))";
     s.textContent=t;
     s.onclick=async()=>{ await tagAdd(it, t); renderTagSuggestions(it); };
     row.appendChild(s);
+  }
+  if(cand.length>TAG_SUG_SHOW){
+    const b=document.createElement("span");
+    b.className="tagchip sug more"; b.style.cssText="border-style:dashed;font-size:calc(10.5px*var(--fsx));color:var(--tx3);cursor:pointer";
+    b.textContent=_tagSugOpen ? "收起" : ("还有 "+(cand.length-TAG_SUG_SHOW)+" 条");
+    b.onclick=()=>{ _tagSugOpen=!_tagSugOpen; renderTagSuggestions(it); };
+    row.appendChild(b);
   }
   panel.appendChild(row);
 }
