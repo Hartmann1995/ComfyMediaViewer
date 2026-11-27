@@ -3826,14 +3826,15 @@ def parse_comfy_prompt(obj: dict) -> dict:
         if not isinstance(up, dict):
             return None
         uinp = _inp(up)
+        # ⚠️ 只按「名字类候选键」递归，**不许兜底跟随任意连线**（2026-11-27 修）。
+        # 反例（MiniMax H3 视频工作流）：SamplerCustomAdvanced.sampler → 331
+        # MiniMaxH3MultiRateSamplerEXPT8（这类自定义采样器**没有** sampler_name），
+        # 旧代码先兜底跟 `model` 走空，再跟 `av_latent` → 333 → `prompt` → 312
+        # PrimitiveStringMultiline，最后在 `value` 上命中 —— 把正向提示词整段
+        # 当成了「采样器」。采样器名只可能挂在名字类字段上，跟着数据流走必错。
         for k in (key, "value", "string", "text", "sampler_name", "scheduler"):
             if k and k in uinp and uinp[k] is not None:
                 r = resolve_str(uinp[k], key, depth + 1)
-                if r:
-                    return r
-        for _k, val in uinp.items():      # 兜底：跟随首个连线引用（中转节点）
-            if isinstance(val, list) and val and isinstance(val[0], str):
-                r = resolve_str(val, key, depth + 1)
                 if r:
                     return r
         return None
@@ -3878,6 +3879,21 @@ def parse_comfy_prompt(obj: dict) -> dict:
     # 采样器名字的字段名有两种拼写：标准 KSampler 用 sampler_name，
     # 自定义采样器（XB_ROCmKSampler 等）用 sampler。写死前者会让「采样器」与
     # 紧随其后的 scheduler 一起静默丢失（下面循环里 v is None 直接 continue）。
+    def _name_ok(t):
+        """采样器 / 调度器的名字长什么样。
+
+        2026-11-27：MiniMax H3 那条链把整段正文当成了采样器（见 resolve_str 的注释）。
+        名字类字段只可能是**短 ASCII 标识符**（`euler` / `dpmpp_2m` / `simple` / `beta57`）；
+        带换行、超长、或含中日韩文字的，一律不收 —— 这是第二道防线。
+        自定义中文采样器名极罕见，真遇到也只是这一格空白，不会显示错东西。
+        """
+        if not isinstance(t, str):
+            return False
+        t = t.strip()
+        if not t or len(t) > 48 or "\n" in t or "\r" in t:
+            return False
+        return all(32 <= ord(ch) < 127 for ch in t)
+
     _sn_key = "sampler_name" if inp.get("sampler_name") is not None else "sampler"
     for k_src, k_dst, num_keys in (
             (_sn_key, "sampler", None), ("scheduler", "scheduler", None),
@@ -3890,13 +3906,27 @@ def parse_comfy_prompt(obj: dict) -> dict:
             v = resolve_num(v, num_keys)
         elif not isinstance(v, str):
             v = resolve_str(v, k_src)   # 名称可能是连线引用，沿连线取真实字符串
-        if v is not None and not isinstance(v, (list, dict)):
-            s[k_dst] = v
+        if v is None or isinstance(v, (list, dict)):
+            continue
+        if k_dst in ("sampler", "scheduler") and not _name_ok(v):
+            continue
+        s[k_dst] = v
     if not s.get("sampler"):
         # SamplerCustom*：采样器名字挂在 sampler 引用的节点上（KSamplerSelect.sampler_name）
         _sn = from_ref(inp.get("sampler"), "sampler_name")
-        if isinstance(_sn, str) and _sn.strip():
+        if isinstance(_sn, str) and _name_ok(_sn):
             s["sampler"] = _sn.strip()
+    if not s.get("sampler"):
+        # 再退一步：引用的节点本身没有名字类字段（MiniMaxH3MultiRateSamplerEXPT8 这类
+        # 多功能采样器，步数/速率各有自己的键），就把**节点类型**显示出来。
+        # 宁可显示「这是哪个采样节点」，也不要空白（会让人以为参数丢了）或提示词（错）。
+        _ref = inp.get("sampler")
+        _up = obj.get(_ref[0]) if (isinstance(_ref, list) and _ref
+                                   and isinstance(_ref[0], str)) else None
+        if isinstance(_up, dict):
+            _ct = _ct_key(_up)
+            if "sampler" in _ct and isinstance(_up.get("class_type"), str):
+                s["sampler"] = _up["class_type"].strip()
     if seed is not None:
         seed = resolve_num(seed, ("seed", "value", "noise_seed"))
     if seed is not None:
@@ -4706,6 +4736,14 @@ def parse_comfy_prompt(obj: dict) -> dict:
             s["_warn"] = ["部分参数经多层连线传递，未能读取：" + "、".join(_miss)]
     if _empty_sides:
         s["_empty"] = _empty_sides
+    # 收尾护栏（2026-11-27）：采样器 / 调度器与正文撞成同一段文本，必是取错。
+    # 名字类值一定在 `_name_ok` 那道就滤掉了，这里再兜一次 —— 因为 positive 直到
+    # 函数后段才定稿，`_name_ok` 里拿不到它。
+    for _k2 in ("sampler", "scheduler"):
+        _v2 = s.get(_k2)
+        if (isinstance(_v2, str) and s.get("positive")
+                and _v2.strip() == s["positive"].strip()):
+            s.pop(_k2, None)
     return s
 
 
@@ -7221,7 +7259,13 @@ def thumb_for(p: Path, size: int = 320):
 
 IDX_FILE = DATA_DIR / "prompt_index.json"
 IDX_IMG_EXTS = (".png", ".jpg", ".jpeg", ".webp")   # 参与提示词索引的格式
-PARSER_VER = 26         # 解析逻辑变更时 +1，使旧缓存整体失效重建
+PARSER_VER = 27         # 解析逻辑变更时 +1，使旧缓存整体失效重建
+                        # 27（2026-11-27）：采样器名字不再「兜底跟随任意连线」。SamplerCustom*
+                        #   的 sampler 指向的自定义采样器（MiniMaxH3MultiRateSamplerEXPT8）
+                        #   没有 sampler_name，旧代码先跟 model 走空、再跟 av_latent →
+                        #   MiniMaxH3AudioConditioningT8 → prompt → PrimitiveStringMultiline，
+                        #   把整段正向提示词当成了「采样器」。索引里存着 sampler ⇒ 不升版
+                        #   则视频与这类新式工作流的筛选 / 统计永远带着那句正文。
                         # 26（2026-11-27）：① parse_jpeg_meta 读 EXIF 里形如 `prompt:{…}` /
                         #   `workflow:{…}` 的 ASCII 标签（JosiaMediaSave 这类写盘节点把整份
                         #   参数塞在 Make/Model 里）—— 此前 WebP/JPEG 只有 A1111 的

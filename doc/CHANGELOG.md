@@ -4,6 +4,49 @@
 
 ---
 
+> ## 🔧 未发版 · 修复 · 视频的「采样器」显示成了一整段提示词（2026-11-27）
+
+> **现象**：主人打开 `exp_4v10a_00001.mp4`（MiniMax H3，480×864，8 秒），详情面板里
+> 「采样器」一行写着 **「生成一段五秒的视频，镜头拉近，转头看镜头微笑，微风吹拂发丝和花朵」**
+> —— 正是这张视频的正向提示词。模型、LoRA、种子都正常，只有这一格串了。
+
+> **原因**：`SamplerCustomAdvanced` 的 `sampler` 是一条连线，指向
+> `MiniMaxH3MultiRateSamplerEXPT8`（这类多速率采样器把步数拆成 `video_steps` / `audio_steps`，
+> **没有** `sampler_name`）。`resolve_str` 在按键名找不到时的兜底是「跟随首个连线引用」，
+> 于是：
+> `331`（无名字字段）→ `model` → `327` → `329` → `332`（走空）→ 回头再跟 `av_latent`
+> → `333 MiniMaxH3AudioConditioningT8` → `prompt` → `312 PrimitiveStringMultiline`
+> → `value` ⇒ **整段正文被当成了采样器名**。
+> 采样器名只可能挂在名字类字段上，跟着数据流走必错。
+
+> **修法（三处 + 一道护栏）**：
+> ① `resolve_str` 删掉「兜底跟随任意连线」，只按名字类候选键（`sampler_name` / `sampler` /
+>    `value` / `string` / `text` / `scheduler`）递归；
+> ② 新增 `_name_ok()`：sampler / scheduler 必须是**短 ASCII 标识符**（≤48 字符、无换行、无中文），
+>    正文无论中英文都进不来；
+> ③ 引用节点确实没有名字字段时，回填**节点类型**（`MiniMaxH3MultiRateSamplerEXPT8`）——
+>    宁可显示「这是哪个采样节点」，也不留空、更不显示正文；类名不含 sampler 的仍留空，不猜；
+> ④ 收尾护栏：`sampler` / `scheduler` 与 `positive` 完全相同 ⇒ 丢弃（`positive` 定稿在函数后段，
+>    `_name_ok` 当时还看不到它）。
+
+> **验证**：
+> · 这张视频：`sampler` = 正文 → `MiniMaxH3MultiRateSamplerEXPT8`；正向 32 字、模型、种子不变。
+> · 新门禁 `tests/video_sampler_20261127_check.py`：**14 PASS / 0 FAIL / 0 SKIP**
+>   （A 段合成工作流 9 条、B 段真实视频 4 条、C 段库内全部 8 个视频 1 条）。
+> · 负控 `dev/_negctl_videosampler_20261127.py`：**四项全部翻红并复绿，ALL CLEAN**。
+>   N1 是「整组退回修复前」——单独还原兜底跟随**不会**翻红，因为 `_name_ok` 与收尾护栏
+>   会各自挡住中文正文（这恰好证明三道防御彼此独立）；把三处一起退回后门禁红 9 条。
+> · 全库回归 `dev/_regress_parser_r27.py`：12,177 张 PNG 逐图对比 r26 基线，
+>   **差异 4 张**，全是同一批 `exp_4v10a_0000{1..4}.png`，且**只有 `sampler` 一个字段**变化
+>   （正文 → 节点类型）；`scheduler` 及其余字段 **0 变化**。
+> · 既有解析门禁复跑无回归：webp_exif 21/0、loratext 18/0、multistage 10/0、zmltext 21/0、
+>   lora-tag ALL CLEAN、purity ALL PASS、slottxt 17/0、switch 15/0、runtime 49/0。
+
+> **PARSER_VER 26 → 27**：索引里 `sampler` 是旧口径（存着那句正文），不升版则搜索与
+> 「按采样器统计」永远带着它。
+
+---
+
 > ## 🔧 未发版 · 修复 · WebP/JPEG 里由写盘节点写的 ComfyUI 参数读不出来（2026-11-27）
 
 > **现象**：主人问桌面的 `Media_005.webp`「是否带元数据」。文件里带得很足 —— EXIF 块
